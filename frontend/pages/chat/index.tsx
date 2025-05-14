@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/router";
-import { useAuthGuard } from "../../utils/authGuard"; // 認証ガード
+import { useAuthGuard } from "../../utils/authGuard";
 
 type User = {
   id: number;
@@ -15,22 +15,18 @@ type Room = {
 };
 
 export default function ChatHome() {
-  useAuthGuard(); // 🔐 認証チェック
+  useAuthGuard(); // 🔐 認証ガード
+
   const router = useRouter();
+  const userId = typeof window !== "undefined"
+  ? parseInt(localStorage.getItem("user_id") || "0")
+  : 0;
 
   const [users, setUsers] = useState<User[]>([]);
-  const [rooms, setRooms] = useState<Room[]>([]);
+  const [rooms, setRooms] = useState<Room[]>([]); // ← null ではなく [] に修正！
   const [error, setError] = useState("");
 
-  const token =
-    typeof window !== "undefined" ? localStorage.getItem("token") : null;
-
-  // 🔽 ログアウト関数
-  const handleLogout = () => {
-    localStorage.removeItem("token");
-    localStorage.removeItem("user_id");
-    router.push("/login");
-  };
+  const token = typeof window !== "undefined" ? localStorage.getItem("token") : null;
 
   useEffect(() => {
     if (!token) return;
@@ -43,7 +39,7 @@ export default function ChatHome() {
         const data = await res.json();
         setUsers(data);
       } catch {
-        setError("ユーザー一覧の取得に失敗しました");
+        setError("ユーザーの取得に失敗しました");
       }
     };
 
@@ -53,9 +49,9 @@ export default function ChatHome() {
           headers: { Authorization: `Bearer ${token}` },
         });
         const data = await res.json();
-        setRooms(data);
+        setRooms(Array.isArray(data) ? data : []);
       } catch {
-        setError("ルーム一覧の取得に失敗しました");
+        setError("ルームの取得に失敗しました");
       }
     };
 
@@ -86,18 +82,18 @@ export default function ChatHome() {
   return (
     <div style={{ padding: "2rem" }}>
       <h2>ようこそ！チャットルームへ</h2>
-
-      {/* 🔽 ログアウトボタン */}
-      <button onClick={handleLogout} style={{ marginBottom: "1.5rem" }}>
-        ログアウト
-      </button>
+      <button onClick={() => {
+        localStorage.removeItem("token");
+        localStorage.removeItem("user_id");
+        router.push("/login");
+      }}>ログアウト</button>
 
       {error && <p style={{ color: "red" }}>{error}</p>}
 
       <h3>ルーム一覧</h3>
       <ul>
-        {rooms.map((room) => (
-          <li key={room.room_id}>
+        {rooms.map((room, index) => (
+          <li key={`${room.room_id}-${index}`}>
             <button onClick={() => router.push(`/chat/${room.room_id}`)}>
               {room.room_name || `Room ${room.room_id}`}
             </button>
@@ -107,12 +103,15 @@ export default function ChatHome() {
 
       <h3>ユーザー一覧（新しくチャットを始める）</h3>
       <ul>
-        {users.map((user) => (
-          <li key={user.id}>
-            <button onClick={() => startChat(user.id)}>{user.username}</button>
-          </li>
-        ))}
-      </ul>
+  {users
+    .filter((user) => user.id !== userId) // 👈 自分を除外！
+    .map((user) => (
+      <li key={user.id}>
+        <button onClick={() => startChat(user.id)}>{user.username}</button>
+      </li>
+  ))}
+</ul>
+
     </div>
   );
 }
