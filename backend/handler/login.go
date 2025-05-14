@@ -2,6 +2,7 @@ package handler
 
 import (
 	"encoding/json"
+	"fmt" // ログ出力に使う
 	"net/http"
 	"strconv"
 	"time"
@@ -16,19 +17,24 @@ type LoginRequest struct {
 }
 
 type LoginResponse struct {
-	Token string `json:"token"`
+	Token  string `json:"token"`
+	UserID int    `json:"user_id"`
 }
 
 func LoginHandler(w http.ResponseWriter, r *http.Request) {
+	fmt.Println("✅ LoginHandler triggered") // ← ログ追加
+
 	var req LoginRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "Invalid input", http.StatusBadRequest)
 		return
 	}
 
+	var userID int
 	var storedPassword string
-	query := `SELECT password_hash FROM users WHERE username = $1`
-	err := db.QueryRow(query, req.Username).Scan(&storedPassword)
+
+	query := `SELECT id, password_hash FROM users WHERE username = $1`
+	err := db.QueryRow(query, req.Username).Scan(&userID, &storedPassword)
 	if err != nil {
 		http.Error(w, "Invalid credentials", http.StatusUnauthorized)
 		return
@@ -40,20 +46,10 @@ func LoginHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// ここで userID を取得！
-	var userID int
-	queryID := `SELECT id FROM users WHERE username = $1`
-	err = db.QueryRow(queryID, req.Username).Scan(&userID)
-	if err != nil {
-		http.Error(w, "User not found", http.StatusUnauthorized)
-		return
-	}
-
-	// JWT生成
 	expirationTime := time.Now().Add(24 * time.Hour)
 	claims := &jwt.StandardClaims{
 		ExpiresAt: expirationTime.Unix(),
-		Subject:   strconv.Itoa(userID), // userIDをstringにしてトークンに入れる
+		Subject:   strconv.Itoa(userID),
 	}
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
 	tokenString, err := token.SignedString(jwtKey)
@@ -62,8 +58,10 @@ func LoginHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	response := LoginResponse{Token: tokenString}
+	response := LoginResponse{
+		Token:  tokenString,
+		UserID: userID,
+	}
 	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(response)
 }

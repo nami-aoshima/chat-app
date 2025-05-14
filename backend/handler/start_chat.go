@@ -5,27 +5,40 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strconv"
 )
 
-// リクエスト用の構造体
+// フロントエンドは receiver_id だけ送ってくる
 type StartChatRequest struct {
-	User1ID int `json:"user1_id"`
-	User2ID int `json:"user2_id"`
+	ReceiverID int `json:"receiver_id"`
 }
 
-// レスポンス用の構造体
 type StartChatResponse struct {
 	RoomID int `json:"room_id"`
 }
 
 func StartChatHandler(w http.ResponseWriter, r *http.Request) {
+	// JWT からログインユーザーIDを取得
+	userIDStr, err := GetUserIDFromToken(r)
+	if err != nil {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+	userID, err := strconv.Atoi(userIDStr)
+	if err != nil {
+		http.Error(w, "Invalid user ID", http.StatusBadRequest)
+		return
+	}
+
+	// リクエストボディから相手のIDを取得
 	var req StartChatRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "Invalid input", http.StatusBadRequest)
 		return
 	}
+	receiverID := req.ReceiverID
 
-	// すでに2人だけのチャットルームが存在するかチェック
+	// すでに同じ2人のチャットがあるかチェック
 	query := `
 	SELECT rm1.room_id
 	FROM room_members rm1
@@ -38,26 +51,27 @@ func StartChatHandler(w http.ResponseWriter, r *http.Request) {
 	`
 
 	var roomID int
-	err := db.QueryRow(query, req.User1ID, req.User2ID).Scan(&roomID)
+	err = db.QueryRow(query, userID, receiverID).Scan(&roomID)
 
 	if err == sql.ErrNoRows {
-		// ルームが存在しない → 新しく作成
+		// 存在しない → 新規作成
 		tx, err := db.Begin()
 		if err != nil {
 			http.Error(w, "Failed to start transaction", http.StatusInternalServerError)
 			return
 		}
 
-		// chat_rooms に新規追加
-		err = tx.QueryRow(`INSERT INTO chat_rooms (room_name, is_group) VALUES ($1, false) RETURNING id`, fmt.Sprintf("Chat %d-%d", req.User1ID, req.User2ID)).Scan(&roomID)
+		// ルーム作成
+		err = tx.QueryRow(`INSERT INTO chat_rooms (room_name, is_group) VALUES ($1, false) RETURNING id`,
+			fmt.Sprintf("Chat %d-%d", userID, receiverID)).Scan(&roomID)
 		if err != nil {
 			tx.Rollback()
 			http.Error(w, "Failed to create chat room", http.StatusInternalServerError)
 			return
 		}
 
-		// room_members に2人を追加
-		_, err = tx.Exec(`INSERT INTO room_members (room_id, user_id) VALUES ($1, $2), ($1, $3)`, roomID, req.User1ID, req.User2ID)
+		// メンバー登録
+		_, err = tx.Exec(`INSERT INTO room_members (room_id, user_id) VALUES ($1, $2), ($1, $3)`, roomID, userID, receiverID)
 		if err != nil {
 			tx.Rollback()
 			http.Error(w, "Failed to add members", http.StatusInternalServerError)
@@ -66,7 +80,7 @@ func StartChatHandler(w http.ResponseWriter, r *http.Request) {
 
 		tx.Commit()
 	} else if err != nil {
-		http.Error(w, "DB error (maybe user doesn't exist)", http.StatusInternalServerError)
+		http.Error(w, "DB error", http.StatusInternalServerError)
 		return
 	}
 

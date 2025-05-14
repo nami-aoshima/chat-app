@@ -7,6 +7,14 @@ import (
 
 // GetUsersHandler returns a list of all users
 func GetUsersHandler(w http.ResponseWriter, r *http.Request) {
+	// 🔒 JWTトークンからユーザーIDを取得（認証チェック）
+	_, err := GetUserIDFromToken(r)
+	if err != nil {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	// 👍 認証OKならユーザー一覧を返す
 	rows, err := db.Query(`SELECT id, username FROM users`)
 	if err != nil {
 		http.Error(w, "Failed to fetch users", http.StatusInternalServerError)
