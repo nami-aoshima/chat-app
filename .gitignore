@@ -1,0 +1,19 @@
+# Node
+node_modules/
+.next/
+
+# Go
+*.exe
+*.out
+*.test
+
+# Logs
+*.log
+
+# Docker
+**/tmp/
+chat_app_db_data/
+pgadmin-data/
+
+# Env
+.env
