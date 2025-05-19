@@ -4,14 +4,16 @@ import (
 	"encoding/json"
 	"net/http"
 	"strconv"
+	"time"
 )
 
 // クライアントに返すルーム情報（表示名付き）
 type RoomDisplay struct {
-	RoomID      int    `json:"room_id"`
-	DisplayName string `json:"display_name"` // ← グループ名 or 相手の名前
-	IsGroup     bool   `json:"is_group"`
-	CreatedAt   string `json:"created_at"`
+	RoomID          int       `json:"room_id"`
+	DisplayName     string    `json:"display_name"` // ← グループ名 or 相手の名前
+	IsGroup         bool      `json:"is_group"`
+	CreatedAt       string    `json:"created_at"`
+	LastMessageTime time.Time `json:"last_message_time"` // ← 追加
 }
 
 // ルームに所属するユーザー（全表示用）
@@ -34,25 +36,29 @@ func GetMyRoomsHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// グループチャットと1対1チャットのルームを統合して取得
+	// 1対1・グループ両方の最新メッセージ順で並べる
 	query := `
 		-- 1対1チャット（相手の名前表示）
-		SELECT cr.id, u.username AS display_name, cr.is_group, cr.created_at
+		SELECT cr.id, u.username AS display_name, cr.is_group, cr.created_at, COALESCE(MAX(m.created_at), cr.created_at) AS last_message_time
 		FROM room_members rm1
 		JOIN chat_rooms cr ON cr.id = rm1.room_id
 		JOIN room_members rm2 ON rm2.room_id = cr.id AND rm2.user_id != rm1.user_id
 		JOIN users u ON u.id = rm2.user_id
+		LEFT JOIN messages m ON cr.id = m.room_id
 		WHERE rm1.user_id = $1 AND cr.is_group = false
+		GROUP BY cr.id, u.username
 
 		UNION
 
 		-- グループチャット（room_name 表示）
-		SELECT cr.id, cr.room_name AS display_name, cr.is_group, cr.created_at
+		SELECT cr.id, cr.room_name AS display_name, cr.is_group, cr.created_at, COALESCE(MAX(m.created_at), cr.created_at) AS last_message_time
 		FROM room_members rm
 		JOIN chat_rooms cr ON cr.id = rm.room_id
+		LEFT JOIN messages m ON cr.id = m.room_id
 		WHERE rm.user_id = $1 AND cr.is_group = true
+		GROUP BY cr.id, cr.room_name
 
-		ORDER BY created_at DESC;
+		ORDER BY last_message_time DESC;
 	`
 
 	rows, err := db.Query(query, userID)
@@ -65,7 +71,7 @@ func GetMyRoomsHandler(w http.ResponseWriter, r *http.Request) {
 	var rooms []RoomDisplay
 	for rows.Next() {
 		var room RoomDisplay
-		if err := rows.Scan(&room.RoomID, &room.DisplayName, &room.IsGroup, &room.CreatedAt); err != nil {
+		if err := rows.Scan(&room.RoomID, &room.DisplayName, &room.IsGroup, &room.CreatedAt, &room.LastMessageTime); err != nil {
 			http.Error(w, "Scan error", http.StatusInternalServerError)
 			return
 		}
