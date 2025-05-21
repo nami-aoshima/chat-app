@@ -26,7 +26,7 @@ func main() {
 	http.HandleFunc("/messages", handler.WithCORS(handler.MessagesRouter)) // メッセージ送信・取得の処理（POST/GETで分ける）
 	// main.go
 	http.HandleFunc("/api/profile", handler.WithCORS(handler.UpdateProfileHandler))
-
+	http.HandleFunc("/ws", handler.WebSocketHandler) // CORS不要（WebSocketは独自にオリジン許可している）
 	// サーバー起動ログを表示（実行中の確認）
 	fmt.Println("Server started at http://localhost:8081")
 

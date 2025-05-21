@@ -32,53 +32,67 @@ export default function ChatRoomPage() {
   const [error, setError] = useState("");
 
   const messageEndRef = useRef<HTMLDivElement | null>(null);
+  const socketRef = useRef<WebSocket | null>(null);
 
+  // WebSocket接続（リアルタイム受信）
+  useEffect(() => {
+    if (!room_id || typeof room_id !== "string" || !token) return;
+
+    const socket = new WebSocket(`ws://localhost:8081/ws?room_id=${room_id}&token=${token}`);
+    socketRef.current = socket;
+
+    socket.onopen = () => console.log("✅ WebSocket connected");
+    socket.onmessage = (event) => {
+      const newMsg: Message = JSON.parse(event.data);
+      if (newMsg.sender_id !== userId) {
+        setMessages((prev) => [...prev, newMsg]);
+      }
+    };
+    socket.onclose = () => console.log("🔌 WebSocket disconnected");
+    socket.onerror = (e) => console.error("❌ WebSocket error:", e);
+
+    return () => socket.close();
+  }, [room_id, token, userId]);
+
+  // ルーム一覧取得
   useEffect(() => {
     if (!token) return;
-    const fetchRooms = async () => {
-      try {
-        const res = await fetch("http://localhost:8081/my_rooms", {
-          headers: { Authorization: `Bearer ${token}` },
-        });
-        const data = await res.json();
-        setRooms(
-          data.sort(
-            (a: Room, b: Room) => new Date(b.last_message_time).getTime() - new Date(a.last_message_time).getTime()
-          )
-        );
-      } catch {
-        setRooms([]);
-      }
-    };
-    fetchRooms();
+    fetch("http://localhost:8081/my_rooms", {
+      headers: { Authorization: `Bearer ${token}` },
+    })
+      .then((res) => res.json())
+      .then((data) =>
+        setRooms(data.sort((a: Room, b: Room) =>
+          new Date(b.last_message_time).getTime() - new Date(a.last_message_time).getTime()
+        ))
+      )
+      .catch(() => setRooms([]));
   }, [token]);
 
+  // メッセージ取得
   useEffect(() => {
     if (!token || typeof room_id !== "string") return;
-    const fetchMessages = async () => {
-      try {
-        const res = await fetch(`http://localhost:8081/messages?room_id=${room_id}`, {
-          headers: { Authorization: `Bearer ${token}` },
-        });
-        const data = await res.json();
-        setMessages(Array.isArray(data) ? data : []);
-      } catch {
+    fetch(`http://localhost:8081/messages?room_id=${room_id}`, {
+      headers: { Authorization: `Bearer ${token}` },
+    })
+      .then((res) => res.json())
+      .then((data) => setMessages(Array.isArray(data) ? data : []))
+      .catch(() => {
         setMessages([]);
         setError("メッセージの取得に失敗しました");
-      }
-    };
-    fetchMessages();
+      });
   }, [room_id, token]);
 
+  // 自動スクロール
   useEffect(() => {
-    if (messageEndRef.current) {
-      messageEndRef.current.scrollIntoView({ behavior: "smooth" });
-    }
+    messageEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
+  // メッセージ送信
   const handleSend = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!input.trim() || typeof room_id !== "string") return;
+
     try {
       const res = await fetch("http://localhost:8081/messages", {
         method: "POST",
@@ -92,10 +106,15 @@ export default function ChatRoomPage() {
           content: input,
         }),
       });
+
       if (!res.ok) throw new Error();
-      const newMsg = await res.json();
+      const newMsg: Message = await res.json();
+
       setMessages((prev) => [...prev, newMsg]);
       setInput("");
+
+      // WebSocket送信（他クライアントへ通知）
+      socketRef.current?.send(JSON.stringify(newMsg));
     } catch {
       setError("送信に失敗しました");
     }
@@ -103,6 +122,7 @@ export default function ChatRoomPage() {
 
   const currentRoom = rooms.find((room) => String(room.room_id) === String(room_id));
 
+  // これ以降：JSX構成（UIそのまま）—変更不要
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100vh", fontFamily: "system-ui, sans-serif" }}>
       <header style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "1rem 2rem", backgroundColor: "#fff", borderBottom: "1px solid #eee" }}>
@@ -150,7 +170,7 @@ export default function ChatRoomPage() {
               return (
                 <>
                   {showDateSeparator && (
-                    <div style={{ textAlign: "center", margin: "1rem 0", color: "#888", fontSize: "0.9rem", fontWeight: "bold" }}>
+                    <div key={`date-${index}`} style={{ textAlign: "center", margin: "1rem 0", color: "#888", fontSize: "0.9rem", fontWeight: "bold" }}>
                       {currentDate.toLocaleDateString("ja-JP", { month: "numeric", day: "numeric", weekday: "short" })}
                     </div>
                   )}
