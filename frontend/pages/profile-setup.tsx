@@ -1,39 +1,42 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useRouter } from 'next/router';
 
-export default function Signup() {
-  const [username, setUsername] = useState('');
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
+export default function ProfileSetup() {
+  const [imageFile, setImageFile] = useState<File | null>(null);
+  const [profileMessage, setProfileMessage] = useState('');
   const [error, setError] = useState('');
   const router = useRouter();
+  const [userId, setUserId] = useState<string>('');
+
+  useEffect(() => {
+    const savedUserId = localStorage.getItem('user_id');
+    if (!savedUserId) {
+      setError('ユーザーIDが見つかりません。ログインし直してください。');
+    } else {
+      setUserId(savedUserId);
+    }
+  }, []);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
-    if (!username || !email || !password) {
-      setError("すべてのフィールドを入力してください");
-      return;
+    const formData = new FormData();
+    if (imageFile) {
+      formData.append('image', imageFile);
     }
+    formData.append('message', profileMessage);
+    formData.append('user_id', userId);
 
     try {
-      const res = await fetch("http://localhost:8081/signup", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ username, email, password }),
+      const res = await fetch('http://localhost:8081/api/profile', {
+        method: 'POST',
+        body: formData,
       });
 
-      if (!res.ok) throw new Error("サインアップ失敗");
-
-      const data = await res.json();
-
-      // user_id を localStorage に保存
-      localStorage.setItem("user_id", String(data.id));
-
-      // プロフィール設定画面へ遷移
-      router.push("/profile-setup");
+      if (!res.ok) throw new Error();
+      router.push('/chat');
     } catch {
-      setError("サインアップに失敗しました。もう一度お試しください。");
+      setError('プロフィールの保存に失敗しました。');
     }
   };
 
@@ -41,38 +44,34 @@ export default function Signup() {
     <div style={styles.container}>
       <div style={styles.card}>
         <h2 style={styles.title}>Welcome</h2>
-        <p style={styles.subtitle}>新しいアカウントを作成</p>
+        <p style={styles.subtitle}>プロフィールを設定しましょう</p>
 
         {error && <p style={styles.error}>{error}</p>}
 
         <form onSubmit={handleSubmit} style={styles.form}>
           <input
-            type="text"
-            placeholder="ユーザー名"
-            value={username}
-            onChange={(e) => setUsername(e.target.value)}
+            type="file"
+            accept="image/*"
+            onChange={(e) => setImageFile(e.target.files?.[0] || null)}
             style={styles.input}
           />
-          <input
-            type="email"
-            placeholder="メールアドレス"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            style={styles.input}
+          <textarea
+            placeholder="ひとこと自己紹介（任意）"
+            value={profileMessage}
+            onChange={(e) => setProfileMessage(e.target.value)}
+            rows={3}
+            style={{ ...styles.input, resize: 'none' }}
           />
-          <input
-            type="password"
-            placeholder="パスワード"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            style={styles.input}
-          />
-          <button type="submit" style={styles.button}>サインアップ</button>
+          <button type="submit" style={styles.button}>
+            保存してチャットへ
+          </button>
         </form>
 
         <p style={styles.footer}>
-          すでにアカウントをお持ちですか？{" "}
-          <button style={styles.link} onClick={() => router.push('/login')}>ログイン</button>
+          今は設定しない？{' '}
+          <button style={styles.link} onClick={() => router.push('/chat')}>
+            スキップ
+          </button>
         </p>
       </div>
     </div>
