@@ -3,48 +3,46 @@ package handler
 import (
 	"encoding/json"
 	"net/http"
+	"strconv"
 )
 
-// GetUsersHandler はすべてのユーザーの id と username を取得して返す API ハンドラー
+// 最小限のユーザー情報を表す構造体
+type UserSimple struct {
+	ID       int    `json:"id"`
+	Username string `json:"username"`
+}
+
 func GetUsersHandler(w http.ResponseWriter, r *http.Request) {
-	// 🔐 ① JWTトークンからユーザーIDを取得（＝認証チェック）
-	// トークンが無効 or なしなら 401 を返して処理終了
-	_, err := GetUserIDFromToken(r)
+	// 認証チェック（JWT）
+	userIDStr, err := GetUserIDFromToken(r)
 	if err != nil {
 		http.Error(w, "Unauthorized", http.StatusUnauthorized)
 		return
 	}
+	userID, err := strconv.Atoi(userIDStr)
+	if err != nil {
+		http.Error(w, "Invalid user ID", http.StatusBadRequest)
+		return
+	}
 
-	// ✅ ② データベースから全ユーザーの id, username を取得
-	rows, err := db.Query(`SELECT id, username FROM users`)
+	// 自分以外のユーザーを取得
+	rows, err := db.Query(`SELECT id, username FROM users WHERE id != $1 ORDER BY username ASC`, userID)
 	if err != nil {
 		http.Error(w, "Failed to fetch users", http.StatusInternalServerError)
 		return
 	}
-	defer rows.Close() // ← 最後に rows をクローズ（リソース解放）
+	defer rows.Close()
 
-	// 🧹 ③ 結果を受け取るための配列を用意（map型のスライス）
-	var users []map[string]interface{}
-
-	// 🌀 ④ 1件ずつ rows から取り出して配列に詰める
+	var users []UserSimple
 	for rows.Next() {
-		var id int
-		var username string
-
-		// 行から id と username を読み取り（エラーハンドリングも忘れず）
-		if err := rows.Scan(&id, &username); err != nil {
+		var user UserSimple
+		if err := rows.Scan(&user.ID, &user.Username); err != nil {
 			http.Error(w, "Failed to scan user", http.StatusInternalServerError)
 			return
 		}
-
-		// map型に変換してスライスに追加
-		users = append(users, map[string]interface{}{
-			"id":       id,
-			"username": username,
-		})
+		users = append(users, user)
 	}
 
-	// 📤 ⑤ JSONとしてレスポンスを返す
-	w.Header().Set("Content-Type", "application/json") // ヘッダーにJSONであることを明示
-	json.NewEncoder(w).Encode(users)                   // usersスライスをJSONにして返却
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(users)
 }

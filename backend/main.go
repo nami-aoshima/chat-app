@@ -27,6 +27,8 @@ func main() {
 	// main.go
 	http.HandleFunc("/api/profile", handler.WithCORS(handler.UpdateProfileHandler))
 	http.HandleFunc("/ws", handler.WebSocketHandler) // CORS不要（WebSocketは独自にオリジン許可している）
+	http.HandleFunc("/create_group", handler.WithCORS(handler.CreateGroupHandler))
+
 	// サーバー起動ログを表示（実行中の確認）
 	fmt.Println("Server started at http://localhost:8081")
 

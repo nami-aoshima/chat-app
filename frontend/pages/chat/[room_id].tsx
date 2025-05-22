@@ -2,7 +2,7 @@ import { useEffect, useState, useRef } from "react";
 import { useRouter } from "next/router";
 import { useAuthGuard } from "../../utils/authGuard";
 
-// 型定義
+// 型定義（ルームとメッセージの構造）
 type Room = {
   room_id: number;
   display_name: string;
@@ -34,7 +34,6 @@ export default function ChatRoomPage() {
   const messageEndRef = useRef<HTMLDivElement | null>(null);
   const socketRef = useRef<WebSocket | null>(null);
 
-  // WebSocket接続（リアルタイム受信）
   useEffect(() => {
     if (!room_id || typeof room_id !== "string" || !token) return;
 
@@ -44,6 +43,7 @@ export default function ChatRoomPage() {
     socket.onopen = () => console.log("✅ WebSocket connected");
     socket.onmessage = (event) => {
       const newMsg: Message = JSON.parse(event.data);
+      console.log("📩 受信したメッセージ：", newMsg);
       if (newMsg.sender_id !== userId) {
         setMessages((prev) => [...prev, newMsg]);
       }
@@ -54,7 +54,6 @@ export default function ChatRoomPage() {
     return () => socket.close();
   }, [room_id, token, userId]);
 
-  // ルーム一覧取得
   useEffect(() => {
     if (!token) return;
     fetch("http://localhost:8081/my_rooms", {
@@ -69,7 +68,6 @@ export default function ChatRoomPage() {
       .catch(() => setRooms([]));
   }, [token]);
 
-  // メッセージ取得
   useEffect(() => {
     if (!token || typeof room_id !== "string") return;
     fetch(`http://localhost:8081/messages?room_id=${room_id}`, {
@@ -83,12 +81,10 @@ export default function ChatRoomPage() {
       });
   }, [room_id, token]);
 
-  // 自動スクロール
   useEffect(() => {
     messageEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
-  // メッセージ送信
   const handleSend = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!input.trim() || typeof room_id !== "string") return;
@@ -113,7 +109,6 @@ export default function ChatRoomPage() {
       setMessages((prev) => [...prev, newMsg]);
       setInput("");
 
-      // WebSocket送信（他クライアントへ通知）
       socketRef.current?.send(JSON.stringify(newMsg));
     } catch {
       setError("送信に失敗しました");
@@ -122,7 +117,6 @@ export default function ChatRoomPage() {
 
   const currentRoom = rooms.find((room) => String(room.room_id) === String(room_id));
 
-  // これ以降：JSX構成（UIそのまま）—変更不要
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100vh", fontFamily: "system-ui, sans-serif" }}>
       <header style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "1rem 2rem", backgroundColor: "#fff", borderBottom: "1px solid #eee" }}>
@@ -168,13 +162,13 @@ export default function ChatRoomPage() {
               const previousDate = index > 0 ? new Date(messages[index - 1].created_at) : null;
               const showDateSeparator = !previousDate || currentDate.toDateString() !== previousDate.toDateString();
               return (
-                <>
+                <div key={`msg-${msg.id}`}> {/* key追加 */}
                   {showDateSeparator && (
-                    <div key={`date-${index}`} style={{ textAlign: "center", margin: "1rem 0", color: "#888", fontSize: "0.9rem", fontWeight: "bold" }}>
+                    <div style={{ textAlign: "center", margin: "1rem 0", color: "#888", fontSize: "0.9rem", fontWeight: "bold" }}>
                       {currentDate.toLocaleDateString("ja-JP", { month: "numeric", day: "numeric", weekday: "short" })}
                     </div>
                   )}
-                  <div key={msg.id} style={{ display: "flex", flexDirection: "column", alignItems: msg.sender_id === userId ? "flex-end" : "flex-start" }}>
+                  <div style={{ display: "flex", flexDirection: "column", alignItems: msg.sender_id === userId ? "flex-end" : "flex-start" }}>
                     <div style={{
                       maxWidth: "70%",
                       padding: "0.75rem 1rem",
@@ -191,7 +185,7 @@ export default function ChatRoomPage() {
                       {currentDate.toLocaleTimeString("ja-JP", { hour: "2-digit", minute: "2-digit", hour12: false })}
                     </div>
                   </div>
-                </>
+                </div>
               );
             })}
             <div ref={messageEndRef} />
@@ -206,3 +200,4 @@ export default function ChatRoomPage() {
     </div>
   );
 }
+  
