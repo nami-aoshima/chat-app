@@ -4,6 +4,7 @@ import (
 	"log"
 	"net/http"
 	"sync"
+	"time"
 
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/gorilla/websocket"
@@ -25,7 +26,6 @@ var upgrader = websocket.Upgrader{
 var roomConnections = make(map[string][]*websocket.Conn)
 var mu sync.Mutex
 
-// WebSocketのハンドラ
 func WebSocketHandler(w http.ResponseWriter, r *http.Request) {
 	roomID := r.URL.Query().Get("room_id")
 	tokenStr := r.URL.Query().Get("token")
@@ -74,7 +74,6 @@ func WebSocketHandler(w http.ResponseWriter, r *http.Request) {
 		mu.Unlock()
 	}()
 
-	// メッセージ受信ループ
 	for {
 		var msg Message
 		if err := conn.ReadJSON(&msg); err != nil {
@@ -82,11 +81,30 @@ func WebSocketHandler(w http.ResponseWriter, r *http.Request) {
 			break
 		}
 
-		// 同じroom_idに属する他の全接続に送信
+		// DBにメッセージ保存（created_at取得付き）
+		query := `INSERT INTO messages (room_id, sender_id, content, created_at)
+		          VALUES ($1, $2, $3, NOW()) RETURNING id, created_at`
+		var id int
+		var createdAt time.Time
+		if err := db.QueryRow(query, msg.RoomID, msg.SenderID, msg.Content).Scan(&id, &createdAt); err != nil {
+			log.Println("DB insert error:", err)
+			continue
+		}
+
+		// 送信用レスポンス構造体に変換
+		res := MessageResponse{
+			ID:        id,
+			RoomID:    msg.RoomID,
+			SenderID:  msg.SenderID,
+			Content:   msg.Content,
+			CreatedAt: createdAt.Format(time.RFC3339),
+		}
+
+		// 他のクライアントに送信
 		mu.Lock()
 		for _, c := range roomConnections[roomID] {
 			if c != conn {
-				if err := c.WriteJSON(msg); err != nil {
+				if err := c.WriteJSON(res); err != nil {
 					log.Println("WriteJSON error:", err)
 				}
 			}

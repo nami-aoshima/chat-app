@@ -16,11 +16,11 @@ type Message struct {
 
 // 📤 クライアントに返すメッセージ構造体（GET・POSTのレスポンス）
 type MessageResponse struct {
-	ID        int       `json:"id"`         // メッセージID（DBの自動採番）
-	RoomID    int       `json:"room_id"`    // ルームID
-	SenderID  int       `json:"sender_id"`  // 送信者ID
-	Content   string    `json:"content"`    // メッセージ本文
-	CreatedAt time.Time `json:"created_at"` // 作成日時
+	ID        int    `json:"id"`         // メッセージID（DBの自動採番）
+	RoomID    int    `json:"room_id"`    // ルームID
+	SenderID  int    `json:"sender_id"`  // 送信者ID
+	Content   string `json:"content"`    // メッセージ本文
+	CreatedAt string `json:"created_at"` // 作成日時
 }
 
 // ------------------------------
@@ -36,7 +36,7 @@ func SendMessageHandler(w http.ResponseWriter, r *http.Request) {
 
 	// ② messagesテーブルにINSERT（現在時刻を created_at に設定）
 	query := `INSERT INTO messages (room_id, sender_id, content, created_at) 
-	          VALUES ($1, $2, $3, NOW()) RETURNING id, created_at`
+				VALUES ($1, $2, $3, NOW()) RETURNING id, created_at`
 
 	var messageID int
 	var createdAt time.Time
@@ -54,7 +54,7 @@ func SendMessageHandler(w http.ResponseWriter, r *http.Request) {
 		RoomID:    msg.RoomID,
 		SenderID:  msg.SenderID,
 		Content:   msg.Content,
-		CreatedAt: createdAt,
+		CreatedAt: createdAt.Format(time.RFC3339),
 	}
 
 	// ⑤ JSONとしてレスポンス返却
@@ -75,7 +75,7 @@ func GetMessagesHandler(w http.ResponseWriter, r *http.Request) {
 
 	// ② 指定された room_id のメッセージを取得（古い順）
 	query := `SELECT id, room_id, sender_id, content, created_at 
-	          FROM messages WHERE room_id = $1 ORDER BY created_at ASC`
+				FROM messages WHERE room_id = $1 ORDER BY created_at ASC`
 
 	rows, err := db.Query(query, roomID)
 	if err != nil {
@@ -87,11 +87,15 @@ func GetMessagesHandler(w http.ResponseWriter, r *http.Request) {
 	// ③ 1件ずつ構造体に読み取り → スライスに追加
 	var messages []MessageResponse
 	for rows.Next() {
-		var msg MessageResponse
-		if err := rows.Scan(&msg.ID, &msg.RoomID, &msg.SenderID, &msg.Content, &msg.CreatedAt); err != nil {
+		var (
+			msg       MessageResponse
+			createdAt time.Time
+		)
+		if err := rows.Scan(&msg.ID, &msg.RoomID, &msg.SenderID, &msg.Content, &createdAt); err != nil {
 			http.Error(w, "Failed to parse messages", http.StatusInternalServerError)
 			return
 		}
+		msg.CreatedAt = createdAt.Format(time.RFC3339)
 		messages = append(messages, msg)
 	}
 
