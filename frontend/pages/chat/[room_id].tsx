@@ -2,7 +2,7 @@ import { useEffect, useState, useRef } from "react";
 import { useRouter } from "next/router";
 import { useAuthGuard } from "../../utils/authGuard";
 
-// 型定義（ルームとメッセージの構造）
+// 型定義
 type Room = {
   room_id: number;
   display_name: string;
@@ -16,6 +16,7 @@ type Message = {
   sender_id: number;
   content: string;
   created_at: string;
+  read_by?: number[];
 };
 
 export default function ChatRoomPage() {
@@ -41,13 +42,29 @@ export default function ChatRoomPage() {
     socketRef.current = socket;
 
     socket.onopen = () => console.log("✅ WebSocket connected");
+
     socket.onmessage = (event) => {
-      const newMsg: Message = JSON.parse(event.data);
-      console.log("📩 受信したメッセージ：", newMsg);
-      if (newMsg.sender_id !== userId) {
-        setMessages((prev) => [...prev, newMsg]);
+      console.log("📩 WS受信:", event.data);
+      const data = JSON.parse(event.data);
+
+      if (data.type === "message_read") {
+        const { message_id, user_id } = data;
+
+        setMessages((prev) =>
+          prev.map((msg) =>
+            msg.id === message_id && !msg.read_by?.includes(user_id)
+              ? { ...msg, read_by: [...(msg.read_by || []), user_id] }
+              : msg
+          )
+        );
+      } else {
+        const newMsg: Message = data;
+        if (newMsg.sender_id !== userId) {
+          setMessages((prev) => [...prev, newMsg]);
+        }
       }
     };
+
     socket.onclose = () => console.log("🔌 WebSocket disconnected");
     socket.onerror = (e) => console.error("❌ WebSocket error:", e);
 
@@ -61,9 +78,11 @@ export default function ChatRoomPage() {
     })
       .then((res) => res.json())
       .then((data) =>
-        setRooms(data.sort((a: Room, b: Room) =>
-          new Date(b.last_message_time).getTime() - new Date(a.last_message_time).getTime()
-        ))
+        setRooms(
+          data.sort((a: Room, b: Room) =>
+            new Date(b.last_message_time).getTime() - new Date(a.last_message_time).getTime()
+          )
+        )
       )
       .catch(() => setRooms([]));
   }, [token]);
@@ -84,6 +103,27 @@ export default function ChatRoomPage() {
   useEffect(() => {
     messageEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
+
+  // ✅ 未読メッセージを既読にする処理（WebSocket通知）
+  useEffect(() => {
+    if (!messages.length || !token || !userId || !socketRef.current) return;
+
+    const unreadMessages = messages.filter(
+      (msg) =>
+        msg.sender_id !== userId &&
+        (!msg.read_by || !msg.read_by.includes(userId))
+    );
+
+    unreadMessages.forEach((msg) => {
+      socketRef.current?.send(
+        JSON.stringify({
+          type: "message_read",
+          message_id: msg.id,
+          user_id: userId,
+        })
+      );
+    });
+  }, [messages, token, userId]);
 
   const handleSend = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -109,7 +149,10 @@ export default function ChatRoomPage() {
       setMessages((prev) => [...prev, newMsg]);
       setInput("");
 
-      socketRef.current?.send(JSON.stringify(newMsg));
+      socketRef.current?.send(JSON.stringify({
+        ...newMsg,
+        type: "message",
+      }));
     } catch {
       setError("送信に失敗しました");
     }
@@ -162,7 +205,7 @@ export default function ChatRoomPage() {
               const previousDate = index > 0 ? new Date(messages[index - 1].created_at) : null;
               const showDateSeparator = !previousDate || currentDate.toDateString() !== previousDate.toDateString();
               return (
-                <div key={`msg-${msg.id}`}> {/* key追加 */}
+                <div key={`msg-${msg.id}`}>
                   {showDateSeparator && (
                     <div style={{ textAlign: "center", margin: "1rem 0", color: "#888", fontSize: "0.9rem", fontWeight: "bold" }}>
                       {currentDate.toLocaleDateString("ja-JP", { month: "numeric", day: "numeric", weekday: "short" })}
@@ -181,6 +224,19 @@ export default function ChatRoomPage() {
                     }}>
                       <div>{msg.content}</div>
                     </div>
+
+                    {/* ✅ 既読表示（送信者のみ） */}
+                    {msg.sender_id === userId && msg.read_by && msg.read_by.filter(id => id !== userId).length > 0 && (
+                      <div style={{ fontSize: "0.7rem", color: "#888", marginTop: "0.2rem", textAlign: "right" }}>
+                        {(() => {
+                          const readers = msg.read_by?.filter((id) => id !== userId) || [];
+                          return readers.length === 1
+                            ? "既読"
+                            : `既読${readers.length}`;
+                        })()}
+                      </div>
+                    )}
+
                     <div style={{ fontSize: "0.7rem", textAlign: "right", opacity: 0.6, marginTop: "0.3rem" }}>
                       {currentDate.toLocaleTimeString("ja-JP", { hour: "2-digit", minute: "2-digit", hour12: false })}
                     </div>
@@ -200,4 +256,3 @@ export default function ChatRoomPage() {
     </div>
   );
 }
-  

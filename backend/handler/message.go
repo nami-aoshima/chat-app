@@ -21,43 +21,40 @@ type MessageResponse struct {
 	SenderID  int    `json:"sender_id"`  // 送信者ID
 	Content   string `json:"content"`    // メッセージ本文
 	CreatedAt string `json:"created_at"` // 作成日時
+	ReadBy    []int  `json:"read_by"`    // 既読ユーザーのID配列
 }
 
 // ------------------------------
 // 📮 メッセージ保存処理（POST）
 // ------------------------------
 func SendMessageHandler(w http.ResponseWriter, r *http.Request) {
-	// ① リクエストボディのJSONを Message 構造体に変換
 	var msg Message
 	if err := json.NewDecoder(r.Body).Decode(&msg); err != nil {
 		http.Error(w, "Invalid input", http.StatusBadRequest)
 		return
 	}
 
-	// ② messagesテーブルにINSERT（現在時刻を created_at に設定）
 	query := `INSERT INTO messages (room_id, sender_id, content, created_at) 
 				VALUES ($1, $2, $3, NOW()) RETURNING id, created_at`
 
 	var messageID int
 	var createdAt time.Time
 
-	// ③ 登録と同時に id, 作成時刻を取得
 	err := db.QueryRow(query, msg.RoomID, msg.SenderID, msg.Content).Scan(&messageID, &createdAt)
 	if err != nil {
 		http.Error(w, fmt.Sprintf("Error sending message: %s", err), http.StatusInternalServerError)
 		return
 	}
 
-	// ④ クライアントにレスポンスとして返すJSONを構築
 	res := MessageResponse{
 		ID:        messageID,
 		RoomID:    msg.RoomID,
 		SenderID:  msg.SenderID,
 		Content:   msg.Content,
 		CreatedAt: createdAt.Format(time.RFC3339),
+		ReadBy:    []int{}, // POST時は空配列で返す
 	}
 
-	// ⑤ JSONとしてレスポンス返却
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(res)
 }
@@ -66,14 +63,12 @@ func SendMessageHandler(w http.ResponseWriter, r *http.Request) {
 // 📥 メッセージ取得処理（GET）
 // ------------------------------
 func GetMessagesHandler(w http.ResponseWriter, r *http.Request) {
-	// ① クエリパラメータから room_id を取得（例：?room_id=3）
 	roomID := r.URL.Query().Get("room_id")
 	if roomID == "" {
 		http.Error(w, "Missing room_id", http.StatusBadRequest)
 		return
 	}
 
-	// ② 指定された room_id のメッセージを取得（古い順）
 	query := `SELECT id, room_id, sender_id, content, created_at 
 				FROM messages WHERE room_id = $1 ORDER BY created_at ASC`
 
@@ -84,7 +79,6 @@ func GetMessagesHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	defer rows.Close()
 
-	// ③ 1件ずつ構造体に読み取り → スライスに追加
 	var messages []MessageResponse
 	for rows.Next() {
 		var (
@@ -96,10 +90,29 @@ func GetMessagesHandler(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		msg.CreatedAt = createdAt.Format(time.RFC3339)
+
+		// ⭐ 空配列で初期化（←ここが重要！）
+		msg.ReadBy = []int{}
+
+		// 📥 read_by（既読ユーザーID一覧）を取得
+		readQuery := `SELECT user_id FROM message_reads WHERE message_id = $1`
+		readRows, err := db.Query(readQuery, msg.ID)
+		if err != nil {
+			http.Error(w, "Failed to fetch read_by", http.StatusInternalServerError)
+			return
+		}
+		defer readRows.Close()
+
+		for readRows.Next() {
+			var uid int
+			if err := readRows.Scan(&uid); err == nil {
+				msg.ReadBy = append(msg.ReadBy, uid)
+			}
+		}
+
 		messages = append(messages, msg)
 	}
 
-	// ④ JSON形式でレスポンスを返す
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(messages)
 }
@@ -108,14 +121,12 @@ func GetMessagesHandler(w http.ResponseWriter, r *http.Request) {
 // 🌐 POST / GET を切り分けるルーター
 // ------------------------------
 func MessagesRouter(w http.ResponseWriter, r *http.Request) {
-	// POST（送信）なら送信処理へ
-	if r.Method == http.MethodPost {
+	switch r.Method {
+	case http.MethodPost:
 		SendMessageHandler(w, r)
-		// GET（取得）なら取得処理へ
-	} else if r.Method == http.MethodGet {
+	case http.MethodGet:
 		GetMessagesHandler(w, r)
-		// それ以外は405エラー
-	} else {
+	default:
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 	}
 }

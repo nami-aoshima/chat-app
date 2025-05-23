@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"encoding/json"
 	"log"
 	"net/http"
 	"sync"
@@ -10,19 +11,18 @@ import (
 	"github.com/gorilla/websocket"
 )
 
-// JWTの秘密鍵（本番では環境変数などで管理）
+// JWTの秘密鍵（本番では環境変数で管理すべき）
 var jwtSecret = []byte("your-secret-key") // フロントと一致させること！
 
 // WebSocketアップグレーダー
 var upgrader = websocket.Upgrader{
 	CheckOrigin: func(r *http.Request) bool {
 		origin := r.Header.Get("Origin")
-		// React側のポートを許可
-		return origin == "http://localhost:3001"
+		return origin == "http://localhost:3001" // フロントのURL
 	},
 }
 
-// ルームごとの接続管理（roomID -> []*websocket.Conn）
+// 接続管理マップ（ルームIDごと）
 var roomConnections = make(map[string][]*websocket.Conn)
 var mu sync.Mutex
 
@@ -35,7 +35,7 @@ func WebSocketHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// トークン検証
+	// JWTトークンの検証
 	claims := jwt.RegisteredClaims{}
 	_, err := jwt.ParseWithClaims(tokenStr, &claims, func(token *jwt.Token) (interface{}, error) {
 		return jwtSecret, nil
@@ -45,7 +45,6 @@ func WebSocketHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// WebSocketアップグレード
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		log.Println("WebSocket upgrade error:", err)
@@ -56,12 +55,12 @@ func WebSocketHandler(w http.ResponseWriter, r *http.Request) {
 
 	log.Printf("✅ WebSocket connected: room_id=%s, user_id=%s\n", roomID, claims.Subject)
 
-	// ルームに接続を登録
+	// 接続をマップに登録
 	mu.Lock()
 	roomConnections[roomID] = append(roomConnections[roomID], conn)
 	mu.Unlock()
 
-	// 切断時に除外
+	// 切断時に除去
 	defer func() {
 		mu.Lock()
 		conns := roomConnections[roomID]
@@ -74,41 +73,99 @@ func WebSocketHandler(w http.ResponseWriter, r *http.Request) {
 		mu.Unlock()
 	}()
 
+	// メッセージ読み込みループ
 	for {
-		var msg Message
-		if err := conn.ReadJSON(&msg); err != nil {
+		var raw map[string]interface{}
+		if err := conn.ReadJSON(&raw); err != nil {
 			log.Println("ReadJSON error:", err)
 			break
 		}
 
-		// DBにメッセージ保存（created_at取得付き）
-		query := `INSERT INTO messages (room_id, sender_id, content, created_at)
-		          VALUES ($1, $2, $3, NOW()) RETURNING id, created_at`
-		var id int
-		var createdAt time.Time
-		if err := db.QueryRow(query, msg.RoomID, msg.SenderID, msg.Content).Scan(&id, &createdAt); err != nil {
-			log.Println("DB insert error:", err)
+		eventType, ok := raw["type"].(string)
+		if !ok {
+			log.Println("Invalid event format (no type)")
 			continue
 		}
 
-		// 送信用レスポンス構造体に変換
-		res := MessageResponse{
-			ID:        id,
-			RoomID:    msg.RoomID,
-			SenderID:  msg.SenderID,
-			Content:   msg.Content,
-			CreatedAt: createdAt.Format(time.RFC3339),
+		switch eventType {
+		case "message":
+			handleNewMessage(raw, conn, roomID)
+		case "message_read":
+			handleMessageRead(raw, roomID)
+		default:
+			log.Println("Unknown event type:", eventType)
 		}
+	}
+}
 
-		// 他のクライアントに送信
-		mu.Lock()
-		for _, c := range roomConnections[roomID] {
-			if c != conn {
-				if err := c.WriteJSON(res); err != nil {
-					log.Println("WriteJSON error:", err)
-				}
+// 新規メッセージ処理
+func handleNewMessage(data map[string]interface{}, conn *websocket.Conn, roomID string) {
+	var msg Message
+	b, _ := json.Marshal(data)
+	json.Unmarshal(b, &msg)
+
+	query := `INSERT INTO messages (room_id, sender_id, content, created_at)
+	          VALUES ($1, $2, $3, NOW()) RETURNING id, created_at`
+	var id int
+	var createdAt time.Time
+	if err := db.QueryRow(query, msg.RoomID, msg.SenderID, msg.Content).Scan(&id, &createdAt); err != nil {
+		log.Println("DB insert error:", err)
+		return
+	}
+
+	res := MessageResponse{
+		ID:        id,
+		RoomID:    msg.RoomID,
+		SenderID:  msg.SenderID,
+		Content:   msg.Content,
+		CreatedAt: createdAt.Format(time.RFC3339),
+		ReadBy:    []int{},
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	for _, c := range roomConnections[roomID] {
+		if c != conn {
+			if err := c.WriteJSON(res); err != nil {
+				log.Println("WriteJSON error:", err)
 			}
 		}
-		mu.Unlock()
+	}
+}
+
+// 既読通知処理
+func handleMessageRead(data map[string]interface{}, roomID string) {
+	messageIDFloat, ok1 := data["message_id"].(float64)
+	userIDFloat, ok2 := data["user_id"].(float64)
+	if !ok1 || !ok2 {
+		log.Println("Invalid message_read payload")
+		return
+	}
+	messageID := int(messageIDFloat)
+	userID := int(userIDFloat)
+
+	// DBに挿入（重複なら無視）
+	_, err := db.Exec(`
+		INSERT INTO message_reads (message_id, user_id) 
+		VALUES ($1, $2) ON CONFLICT DO NOTHING
+	`, messageID, userID)
+	if err != nil {
+		log.Println("Error inserting message_read:", err)
+		return
+	}
+
+	// 全クライアントに通知
+	msg := map[string]interface{}{
+		"type":       "message_read",
+		"message_id": messageID,
+		"user_id":    userID,
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	for _, c := range roomConnections[roomID] {
+		if err := c.WriteJSON(msg); err != nil {
+			log.Println("WriteJSON error (message_read):", err)
+		}
 	}
 }

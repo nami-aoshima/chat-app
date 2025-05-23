@@ -26,6 +26,7 @@ type User struct {
 
 // DBを初期化する関数（アプリ起動時に一度だけ呼ばれる）
 func InitDB() {
+
 	var err error
 
 	// 環境変数から接続情報を読み取って接続文字列を作成
