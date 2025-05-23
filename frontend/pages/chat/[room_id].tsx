@@ -44,26 +44,26 @@ export default function ChatRoomPage() {
     socket.onopen = () => console.log("✅ WebSocket connected");
 
     socket.onmessage = (event) => {
-      console.log("📩 WS受信:", event.data);
-      const data = JSON.parse(event.data);
+  const data = JSON.parse(event.data);
 
-      if (data.type === "message_read") {
-        const { message_id, user_id } = data;
-
-        setMessages((prev) =>
-          prev.map((msg) =>
-            msg.id === message_id && !msg.read_by?.includes(user_id)
-              ? { ...msg, read_by: [...(msg.read_by || []), user_id] }
-              : msg
-          )
-        );
-      } else {
-        const newMsg: Message = data;
-        if (newMsg.sender_id !== userId) {
-          setMessages((prev) => [...prev, newMsg]);
-        }
-      }
-    };
+  if (data.type === "message_read") {
+    const { message_id, user_id } = data;
+    setMessages((prev) =>
+      prev.map((msg) =>
+        msg.id === message_id && !msg.read_by?.includes(user_id)
+          ? { ...msg, read_by: [...(msg.read_by || []), user_id] }
+          : msg
+      )
+    );
+  } else {
+    const newMsg: Message = data;
+    if (newMsg.sender_id !== userId) {
+      setMessages((prev) =>
+        prev.some((msg) => msg.id === newMsg.id) ? prev : [...prev, newMsg]
+);
+    }
+  }
+};
 
     socket.onclose = () => console.log("🔌 WebSocket disconnected");
     socket.onerror = (e) => console.error("❌ WebSocket error:", e);

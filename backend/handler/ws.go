@@ -5,7 +5,6 @@ import (
 	"log"
 	"net/http"
 	"sync"
-	"time"
 
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/gorilla/websocket"
@@ -98,35 +97,17 @@ func WebSocketHandler(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// 新規メッセージ処理
+// 新規メッセージ処理（保存はせず、ブロードキャストのみ）
 func handleNewMessage(data map[string]interface{}, conn *websocket.Conn, roomID string) {
-	var msg Message
+	var msg MessageResponse
 	b, _ := json.Marshal(data)
 	json.Unmarshal(b, &msg)
-
-	query := `INSERT INTO messages (room_id, sender_id, content, created_at)
-	          VALUES ($1, $2, $3, NOW()) RETURNING id, created_at`
-	var id int
-	var createdAt time.Time
-	if err := db.QueryRow(query, msg.RoomID, msg.SenderID, msg.Content).Scan(&id, &createdAt); err != nil {
-		log.Println("DB insert error:", err)
-		return
-	}
-
-	res := MessageResponse{
-		ID:        id,
-		RoomID:    msg.RoomID,
-		SenderID:  msg.SenderID,
-		Content:   msg.Content,
-		CreatedAt: createdAt.Format(time.RFC3339),
-		ReadBy:    []int{},
-	}
 
 	mu.Lock()
 	defer mu.Unlock()
 	for _, c := range roomConnections[roomID] {
 		if c != conn {
-			if err := c.WriteJSON(res); err != nil {
+			if err := c.WriteJSON(msg); err != nil {
 				log.Println("WriteJSON error:", err)
 			}
 		}
