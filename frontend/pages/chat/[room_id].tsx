@@ -69,7 +69,7 @@ export default function ChatRoomPage() {
     return () => socket.close();
   }, [room_id, token, userId]);
 
-    useEffect(() => {
+  useEffect(() => {
     if (!token) return;
     fetch("http://localhost:8081/my_rooms", {
       headers: { Authorization: `Bearer ${token}` },
@@ -102,7 +102,6 @@ export default function ChatRoomPage() {
     messageEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
-  // ✅ 未読メッセージを既読にする処理（WebSocket通知）
   useEffect(() => {
     if (!messages.length || !token || !userId || !socketRef.current) return;
 
@@ -170,14 +169,14 @@ export default function ChatRoomPage() {
 
       const data = await res.json();
       if (data.url) {
-        await sendMessage(data.url); // 画像URLを送信
+        await sendMessage(data.url);
       }
     } catch {
       alert("画像アップロードに失敗しました");
     }
   };
 
-    const currentRoom = rooms.find((room) => String(room.room_id) === String(room_id));
+  const currentRoom = rooms.find((room) => String(room.room_id) === String(room_id));
 
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100vh", fontFamily: "system-ui, sans-serif" }}>
@@ -190,11 +189,11 @@ export default function ChatRoomPage() {
         <aside style={{ width: "300px", backgroundColor: "#fff5f4", padding: "1.5rem 1rem", borderRight: "1px solid #f1dcdc", boxShadow: "2px 0 6px rgba(0,0,0,0.03)", overflowY: "auto" }}>
           <div style={{ display: "flex", gap: "1rem", alignItems: "center", marginBottom: "1rem" }}>
             <button onClick={() => router.push("/chat")} style={{ padding: "0.4rem 0.75rem", fontSize: "0.9rem", color: "#2d3142", backgroundColor: "transparent", border: "1px solid #ccc", borderRadius: "8px", cursor: "pointer" }}>戻る</button>
-            <h3 style={{ fontSize: "1rem", fontWeight: 700, color: "#2d3142", margin: 0 }}>ルーム一覧</h3>
+            <h3 style={{ fontSize: "1.1rem", fontWeight: 700, color: "#2d3142", margin: 0 }}>ルーム一覧</h3>
           </div>
           <ul style={{ listStyle: "none", padding: 0, margin: 0, display: "flex", flexDirection: "column", gap: "0.75rem" }}>
             {rooms.map((room) => (
-              <li key={room.room_id}>
+              <li key={room.room_id} style={{ borderRadius: "12px" }}>
                 <button onClick={() => router.push(`/chat/${room.room_id}`)} style={{
                   border: "none",
                   outline: "none",
@@ -214,7 +213,7 @@ export default function ChatRoomPage() {
           </ul>
         </aside>
 
-                <main style={{ flex: 1, display: "flex", flexDirection: "column", padding: "2rem", backgroundColor: "#ffffff", overflowY: "auto" }}>
+        <main style={{ flex: 1, display: "flex", flexDirection: "column", padding: "2rem", backgroundColor: "#ffffff", overflowY: "auto" }}>
           <div style={{ fontSize: "1.4rem", fontWeight: "bold", color: "#2d3142", marginBottom: "1.2rem", borderBottom: "1px solid #eee", paddingBottom: "0.5rem", textAlign: "left" }}>
             {currentRoom?.display_name ?? `ルーム #${room_id}`}
           </div>
@@ -226,9 +225,11 @@ export default function ChatRoomPage() {
               const currentDate = new Date(msg.created_at);
               const previousDate = index > 0 ? new Date(messages[index - 1].created_at) : null;
               const showDateSeparator = !previousDate || currentDate.toDateString() !== previousDate.toDateString();
+              const isImage = msg.content.match(/\.(jpg|jpeg|png|gif)$/i) || msg.content.startsWith("/uploads/");
+              const readers = (msg.read_by ?? []).filter(id => id !== userId);
 
               return (
-                <div key={`msg-${msg.id}`}>
+                <div key={`msg-${msg.id}`} style={{ marginBottom: "1.2rem" }}>
                   {showDateSeparator && (
                     <div style={{ textAlign: "center", margin: "1rem 0", color: "#888", fontSize: "0.9rem", fontWeight: "bold" }}>
                       {currentDate.toLocaleDateString("ja-JP", { month: "numeric", day: "numeric", weekday: "short" })}
@@ -236,33 +237,41 @@ export default function ChatRoomPage() {
                   )}
 
                   <div style={{ display: "flex", flexDirection: "column", alignItems: msg.sender_id === userId ? "flex-end" : "flex-start" }}>
+                    {isImage ? (
+                      <img
+                        src={`http://localhost:8081${msg.content}`}
+                        alt="画像"
+                        style={{ maxWidth: "70%", borderRadius: "8px" }}
+                      />
+                    ) : (
+                      <div style={{
+                        maxWidth: "70%",
+                        padding: "0.75rem 1rem",
+                        borderRadius: "16px",
+                        fontSize: "1rem",
+                        lineHeight: "1.4",
+                        boxShadow: "0 1px 4px rgba(0,0,0,0.04)",
+                        backgroundColor: msg.sender_id === userId ? "#f0616d" : "#e6e9f0",
+                        color: msg.sender_id === userId ? "#fff" : "#2d3142",
+                      }}>
+                        <span>{msg.content}</span>
+                      </div>
+                    )}
+
                     <div style={{
-                      maxWidth: "70%",
-                      padding: "0.75rem 1rem",
-                      borderRadius: "16px",
-                      fontSize: "1rem",
-                      lineHeight: "1.4",
-                      boxShadow: "0 1px 4px rgba(0,0,0,0.04)",
-                      backgroundColor: msg.sender_id === userId ? "#f0616d" : "#e6e9f0",
-                      color: msg.sender_id === userId ? "#fff" : "#2d3142",
+                      fontSize: "0.7rem",
+                      textAlign: "right",
+                      opacity: 0.6,
+                      marginTop: "0.3rem",
+                      display: "flex",
+                      gap: "0.5rem"
                     }}>
-                      {msg.content.match(/\.(jpg|jpeg|png|gif)$/i) || msg.content.startsWith("/uploads/")
-                        ? <img src={`http://localhost:8081${msg.content}`} alt="画像" style={{ maxWidth: "100%", borderRadius: "8px" }} />
-                        : <span>{msg.content}</span>}
-
-                      {/* ✅ 既読表示（自分が送信したメッセージにだけ） */}
-                      {msg.sender_id === userId && (msg.read_by ?? []).filter(id => id !== userId).length > 0 && (
-  <div style={{ fontSize: "0.7rem", color: "#eee", marginTop: "0.2rem", textAlign: "right" }}>
-    {(() => {
-      const readers = (msg.read_by ?? []).filter(id => id !== userId);
-      return readers.length === 1 ? "既読" : `既読${readers.length}`;
-    })()}
-  </div>
-)}
-
-                    </div>
-                    <div style={{ fontSize: "0.7rem", textAlign: "right", opacity: 0.6, marginTop: "0.3rem" }}>
-                      {currentDate.toLocaleTimeString("ja-JP", { hour: "2-digit", minute: "2-digit", hour12: false })}
+                      {msg.sender_id === userId && readers.length > 0 && (
+                        <span style={{ color: "#888" }}>
+                          {readers.length === 1 ? "既読" : `既読${readers.length}`}
+                        </span>
+                      )}
+                      <span>{currentDate.toLocaleTimeString("ja-JP", { hour: "2-digit", minute: "2-digit", hour12: false })}</span>
                     </div>
                   </div>
                 </div>
@@ -271,23 +280,79 @@ export default function ChatRoomPage() {
             <div ref={messageEndRef} />
           </div>
 
-          <form onSubmit={handleSend} style={{ display: "flex", gap: "0.75rem", alignItems: "center" }}>
-            <input type="file" accept="image/*" onChange={handleImageUpload} style={{
-              padding: "0.4rem 0.75rem",
-              fontSize: "0.9rem",
-              backgroundColor: "#ffecec",
-              border: "1px solid #ccc",
-              borderRadius: "8px",
-              color: "#2d3142",
-              cursor: "pointer"
-            }} />
-            <input type="text" value={input} onChange={(e) => setInput(e.target.value)} placeholder="メッセージを入力..." style={{ flex: 1, padding: "0.75rem 1rem", borderRadius: "12px", border: "1px solid #ccc", fontSize: "1rem" }} />
-            <button type="submit" style={{ backgroundColor: "#f0616d", color: "#fff", border: "none", borderRadius: "12px", padding: "0.75rem 1.5rem", fontWeight: "bold", fontSize: "1rem", cursor: "pointer" }}>送信</button>
-          </form>
+          <form
+  onSubmit={handleSend}
+  style={{
+    display: "flex",
+    gap: "0.5rem",
+    marginTop: "auto",
+    alignItems: "center",
+  }}
+>
+  <input
+    type="text"
+    value={input}
+    onChange={(e) => setInput(e.target.value)}
+    placeholder="メッセージを入力"
+    style={{
+      flex: 1,
+      padding: "0.75rem",
+      borderRadius: "8px",
+      border: "1px solid #ccc",
+      fontSize: "1rem",
+    }}
+  />
+
+  {/* 画像ボタン（薄ピンク） */}
+  <label
+    htmlFor="file-upload"
+    style={{
+      backgroundColor: "#ffecec",
+      color: "#2d3142",
+      padding: "0.6rem 1rem",
+      borderRadius: "8px",
+      cursor: "pointer",
+      fontWeight: 600,
+      fontSize: "0.9rem",
+      border: "1px solid #f1dcdc",
+      transition: "background-color 0.2s ease",
+    }}
+    onMouseOver={(e) => (e.currentTarget.style.backgroundColor = "#fcdcdc")}
+    onMouseOut={(e) => (e.currentTarget.style.backgroundColor = "#ffecec")}
+  >
+     ファイルを選択
+  </label>
+  <input
+    id="file-upload"
+    type="file"
+    accept="image/*"
+    onChange={handleImageUpload}
+    style={{ display: "none" }}
+  />
+
+  {/* 送信ボタン（同じ形状で濃い色） */}
+  <button
+    type="submit"
+    style={{
+      padding: "0.6rem 1rem",
+      backgroundColor: "#f0616d",
+      color: "white",
+      border: "none",
+      borderRadius: "8px",
+      cursor: "pointer",
+      fontWeight: 600,
+      fontSize: "0.9rem",
+      transition: "background-color 0.2s ease",
+    }}
+    onMouseOver={(e) => (e.currentTarget.style.backgroundColor = "#e45763")}
+    onMouseOut={(e) => (e.currentTarget.style.backgroundColor = "#f0616d")}
+  >
+    送信
+  </button>
+</form>
+
         </main>
       </div>
     </div>
   );
 }
-
-
