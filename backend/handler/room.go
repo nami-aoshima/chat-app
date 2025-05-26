@@ -2,6 +2,7 @@ package handler
 
 import (
 	"encoding/json"
+	"log"
 	"net/http"
 	"strconv"
 	"time"
@@ -13,6 +14,7 @@ type RoomDisplay struct {
 	IsGroup         bool      `json:"is_group"`
 	CreatedAt       string    `json:"created_at"`
 	LastMessageTime time.Time `json:"last_message_time"`
+	UnreadCount     int       `json:"unread_count"`
 }
 
 type RoomMember struct {
@@ -40,44 +42,61 @@ func GetMyRoomsHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	query := `
-		-- 1対1チャット
-SELECT
-  cr.id,
-  u.username AS display_name,
-  cr.is_group,
-  cr.created_at,
-  COALESCE(MAX(m.created_at), cr.created_at) AS last_message_time
-FROM room_members rm1
-JOIN chat_rooms cr ON cr.id = rm1.room_id
-JOIN room_members rm2 ON rm2.room_id = cr.id AND rm2.user_id != rm1.user_id
-JOIN users u ON u.id = rm2.user_id
-LEFT JOIN messages m ON cr.id = m.room_id
-WHERE rm1.user_id = $1 AND cr.is_group = false
-GROUP BY cr.id, u.username, cr.is_group, cr.created_at
+WITH unread_counts AS (
+  SELECT
+    m.room_id,
+    COUNT(*) AS unread_count
+  FROM messages m
+  LEFT JOIN message_reads mr
+    ON m.id = mr.message_id AND mr.user_id = $1
+  WHERE mr.message_id IS NULL AND m.sender_id != $1
+  GROUP BY m.room_id
+)
 
-UNION
+-- 本体
+SELECT * FROM (
+  -- 1対1チャット
+  SELECT
+    cr.id AS room_id,
+    u.username AS display_name,
+    cr.is_group,
+    cr.created_at,
+    COALESCE(MAX(m.created_at), cr.created_at) AS last_message_time,
+    COALESCE(uc.unread_count, 0) AS unread_count
+  FROM room_members rm1
+  JOIN chat_rooms cr ON cr.id = rm1.room_id
+  JOIN room_members rm2 ON rm2.room_id = cr.id AND rm2.user_id != rm1.user_id
+  JOIN users u ON u.id = rm2.user_id
+  LEFT JOIN messages m ON cr.id = m.room_id
+  LEFT JOIN unread_counts uc ON cr.id = uc.room_id
+  WHERE rm1.user_id = $1 AND cr.is_group = false
+  GROUP BY cr.id, u.username, cr.is_group, cr.created_at, uc.unread_count
 
--- グループチャット（メンバー数つき表示名）
-SELECT
-  cr.id,
-  cr.room_name || ' (' || COALESCE(member_counts.count, 1) || ')' AS display_name,
-  cr.is_group,
-  cr.created_at,
-  COALESCE(MAX(m.created_at), cr.created_at) AS last_message_time
-FROM room_members rm
-JOIN chat_rooms cr ON cr.id = rm.room_id
-LEFT JOIN messages m ON cr.id = m.room_id
-LEFT JOIN (
-  SELECT room_id, COUNT(*) AS count
-  FROM room_members
-  GROUP BY room_id
-) AS member_counts ON cr.id = member_counts.room_id
-WHERE rm.user_id = $1 AND cr.is_group = true
-GROUP BY cr.id, cr.room_name, cr.is_group, cr.created_at, member_counts.count
+  UNION
 
+  -- グループチャット
+  SELECT
+    cr.id AS room_id,
+    cr.room_name || ' (' || COALESCE(mc.count, 1) || ')' AS display_name,
+    cr.is_group,
+    cr.created_at,
+    COALESCE(MAX(m.created_at), cr.created_at) AS last_message_time,
+    COALESCE(uc.unread_count, 0) AS unread_count
+  FROM room_members rm
+  JOIN chat_rooms cr ON cr.id = rm.room_id
+  LEFT JOIN messages m ON cr.id = m.room_id
+  LEFT JOIN (
+    SELECT room_id, COUNT(*) AS count
+    FROM room_members
+    GROUP BY room_id
+  ) mc ON cr.id = mc.room_id
+  LEFT JOIN unread_counts uc ON cr.id = uc.room_id
+  WHERE rm.user_id = $1 AND cr.is_group = true
+  GROUP BY cr.id, cr.room_name, cr.is_group, cr.created_at, mc.count, uc.unread_count
+) AS rooms
 ORDER BY last_message_time DESC;
 
-	`
+`
 
 	rows, err := db.Query(query, userID)
 	if err != nil {
@@ -89,7 +108,8 @@ ORDER BY last_message_time DESC;
 	var rooms []RoomDisplay
 	for rows.Next() {
 		var room RoomDisplay
-		if err := rows.Scan(&room.RoomID, &room.DisplayName, &room.IsGroup, &room.CreatedAt, &room.LastMessageTime); err != nil {
+		if err := rows.Scan(&room.RoomID, &room.DisplayName, &room.IsGroup, &room.CreatedAt, &room.LastMessageTime, &room.UnreadCount); err != nil {
+			log.Println("Scan error:", err)
 			http.Error(w, "Scan error", http.StatusInternalServerError)
 			return
 		}

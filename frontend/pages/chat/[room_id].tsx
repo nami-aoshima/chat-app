@@ -7,6 +7,7 @@ type Room = {
   display_name: string;
   created_at: string;
   last_message_time: string;
+  unread_count: number;
 };
 
 type Message = {
@@ -194,7 +195,9 @@ export default function ChatRoomPage() {
           <ul style={{ listStyle: "none", padding: 0, margin: 0, display: "flex", flexDirection: "column", gap: "0.75rem" }}>
             {rooms.map((room) => (
               <li key={room.room_id} style={{ borderRadius: "12px" }}>
-                <button onClick={() => router.push(`/chat/${room.room_id}`)} style={{
+                <button 
+                onClick={() => router.push(`/chat/${room.room_id}`)} 
+                style={{
                   border: "none",
                   outline: "none",
                   width: "100%",
@@ -207,10 +210,33 @@ export default function ChatRoomPage() {
                   transition: "all 0.2s ease",
                   backgroundColor: String(room.room_id) === room_id ? "#f0616d" : "#ffecec",
                   color: String(room.room_id) === room_id ? "#fff" : "#2d3142",
-                }}>{room.display_name}</button>
-              </li>
-            ))}
-          </ul>
+                }}
+                >
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          <span>{room.display_name}</span>
+          {room.unread_count > 0 && (
+            <span style={{
+              backgroundColor: "#f0616d",
+              color: "#fff",
+              fontSize: "0.75rem",
+              borderRadius: "12px",
+              padding: "0.1rem 0.5rem",
+              marginLeft: "0.5rem",
+              minWidth: "1.5rem",
+              textAlign: "center",
+              fontWeight: "bold"
+            }}>
+              {room.unread_count}
+            </span>
+          )}
+        </div>
+      </button>
+    </li>
+  ))}
+</ul>
+
+
+                  
         </aside>
 
         <main style={{ flex: 1, display: "flex", flexDirection: "column", padding: "2rem", backgroundColor: "#ffffff", overflowY: "auto" }}>
