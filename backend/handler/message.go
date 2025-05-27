@@ -4,7 +4,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"regexp"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -23,6 +25,17 @@ type MessageResponse struct {
 	Content   string `json:"content"`    // メッセージ本文
 	CreatedAt string `json:"created_at"` // 作成日時
 	ReadBy    []int  `json:"read_by"`    // 既読ユーザーのID配列
+}
+
+func extractMentions(content string) []string {
+	words := strings.Fields(content)
+	var mentions []string
+	for _, word := range words {
+		if strings.HasPrefix(word, "@") {
+			mentions = append(mentions, strings.TrimPrefix(word, "@"))
+		}
+	}
+	return mentions
 }
 
 // ------------------------------
@@ -44,6 +57,7 @@ func SendMessageHandler(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Invalid input", http.StatusBadRequest)
 		return
 	}
+	fmt.Println("📩 メッセージ内容:", msg.Content)
 
 	query := `INSERT INTO messages (room_id, sender_id, content, created_at) 
 				VALUES ($1, $2, $3, NOW()) RETURNING id, created_at`
@@ -64,6 +78,40 @@ func SendMessageHandler(w http.ResponseWriter, r *http.Request) {
 		Content:   msg.Content,
 		CreatedAt: createdAt.Format(time.RFC3339),
 		ReadBy:    []int{},
+	}
+	// --- メンション処理（@ユーザー名 抽出） ---
+
+	mentionRegex := regexp.MustCompile(`@(\w+)`)
+	matches := mentionRegex.FindAllStringSubmatch(msg.Content, -1)
+
+	for _, match := range matches {
+		if len(match) < 2 {
+			continue
+		}
+		username := match[1]
+
+		// ユーザー名からユーザーID取得
+		var mentionedUserID int
+		err := db.QueryRow(`SELECT id FROM users WHERE username = $1`, username).Scan(&mentionedUserID)
+		if err != nil {
+			continue // ユーザーが見つからなければスキップ
+		}
+
+		// mentions テーブルに保存
+
+		_, err = db.Exec(`
+	INSERT INTO mentions (message_id, mention_target_id)
+	VALUES ($1, $2) ON CONFLICT DO NOTHING
+`, messageID, mentionedUserID)
+
+		if err != nil {
+			fmt.Println("❌ mention insert error:", err)
+		}
+		// WebSocket通知（自分以外）
+		if mentionedUserID != userID {
+			BroadcastMentionNotification(msg.RoomID, mentionedUserID, userID, msg.Content)
+		}
+
 	}
 
 	w.Header().Set("Content-Type", "application/json")

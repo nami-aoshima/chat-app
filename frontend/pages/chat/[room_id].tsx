@@ -32,6 +32,8 @@ export default function ChatRoomPage() {
   const [input, setInput] = useState("");
   const [error, setError] = useState("");
 
+  const [mentionRooms, setMentionRooms] = useState<number[]>([]);
+
   const messageEndRef = useRef<HTMLDivElement | null>(null);
   const socketMapRef = useRef<Map<number, WebSocket>>(new Map());
   const roomIdRef = useRef<string | undefined>(undefined);
@@ -114,6 +116,19 @@ export default function ChatRoomPage() {
   })
 );
         }
+        else if (data.type === "mention") {
+          console.log("📣 メンション通知:", data);
+  const { room_id, user_id } = data;
+
+  // 自分へのメンションだけ追加（他人宛のはスルー）
+  if (user_id === userId) {
+    setMentionRooms((prev) =>
+      prev.includes(room_id) ? prev : [...prev, room_id]
+    );
+  }
+}
+
+
       };
 
       ws.onclose = () => console.log(`🔌 WS CLOSED: room ${roomId}`);
@@ -169,6 +184,18 @@ export default function ChatRoomPage() {
       });
     }
   }, [messages, token, userId, room_id]);
+
+  useEffect(() => {
+  if (!room_id || typeof room_id !== "string") return;
+
+  // 現在表示中のroom_idを数値に変換
+  const currentId = parseInt(room_id);
+
+  // mentionRoomsに含まれていれば除外（通知を消す）
+  setMentionRooms((prev) => prev.filter((id) => id !== currentId));
+}, [room_id]);
+
+  
 
   const sendMessage = async (content: string) => {
     try {
@@ -269,23 +296,37 @@ export default function ChatRoomPage() {
                 }}
                 >
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-          <span>{room.display_name}</span>
-          {room.unread_count > 0 && (
-            <span style={{
-              backgroundColor: "#f0616d",
-              color: "#fff",
-              fontSize: "0.75rem",
-              borderRadius: "12px",
-              padding: "0.1rem 0.5rem",
-              marginLeft: "0.5rem",
-              minWidth: "1.5rem",
-              textAlign: "center",
-              fontWeight: "bold"
-            }}>
-              {room.unread_count}
-            </span>
-          )}
-        </div>
+  <div style={{ display: "flex", flexDirection: "column" }}>
+    <span>{room.display_name}</span>
+    {mentionRooms.includes(room.room_id) && (
+      <span style={{
+        fontSize: "0.75rem",
+        color: "#e45763",
+        fontWeight: "bold",
+        marginTop: "2px"
+      }}>
+        メンションされました
+      </span>
+    )}
+  </div>
+
+  {room.unread_count > 0 && (
+    <span style={{
+      backgroundColor: "#f0616d",
+      color: "#fff",
+      fontSize: "0.75rem",
+      borderRadius: "12px",
+      padding: "0.1rem 0.5rem",
+      marginLeft: "0.5rem",
+      minWidth: "1.5rem",
+      textAlign: "center",
+      fontWeight: "bold"
+    }}>
+      {room.unread_count}
+    </span>
+  )}
+</div>
+
       </button>
     </li>
   ))}

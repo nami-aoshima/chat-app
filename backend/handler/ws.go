@@ -8,6 +8,10 @@ import (
 
 	"strconv"
 
+	"time"
+
+	"fmt"
+
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/gorilla/websocket"
 )
@@ -101,19 +105,45 @@ func WebSocketHandler(w http.ResponseWriter, r *http.Request) {
 
 // 新規メッセージ処理（保存はせず、ブロードキャストのみ）
 func handleNewMessage(data map[string]interface{}, conn *websocket.Conn, roomID string) {
-	data["type"] = "message" //
+	log.Println("💬 handleNewMessage called")
+
+	data["type"] = "message"
+
+	// ログ出力（デバッグ用）
+	if content, ok := data["content"].(string); ok {
+		log.Println("📩 メッセージ内容:", content)
+	}
 
 	var msg MessageResponse
 	b, _ := json.Marshal(data)
 	json.Unmarshal(b, &msg)
 
-	roomInt, err := strconv.Atoi(roomID)
-	if err != nil {
-		log.Println("Invalid roomID:", roomID)
-		return
+	// 🆕 sender_id を正しくセット
+	if senderIDFloat, ok := data["sender_id"].(float64); ok {
+		msg.SenderID = int(senderIDFloat)
+		log.Println("👤 sender_id is", msg.SenderID)
+	} else {
+		log.Println("❌ sender_id missing in data")
 	}
 
-	msg.RoomID = roomInt
+	log.Println("📛 checking mentions in:", msg.Content)
+	mentions := extractMentions(msg.Content)
+	log.Println("📛 extracted mentions:", mentions)
+
+	// メンションごとの通知処理
+	for _, username := range mentions {
+		var mentionedUserID int
+		err := db.QueryRow("SELECT id FROM users WHERE username = $1", username).Scan(&mentionedUserID)
+		if err == nil {
+			log.Println("📣 found user_id:", mentionedUserID, "for username:", username)
+			log.Println("👥 comparing:", mentionedUserID, "vs", msg.SenderID)
+
+			if mentionedUserID != msg.SenderID {
+				go BroadcastMentionNotification(msg.RoomID, mentionedUserID, msg.SenderID, msg.Content)
+			}
+		}
+	}
+	// ...以下省略（既存のbroadcast処理など）
 
 	mu.Lock()
 	defer mu.Unlock()
@@ -167,6 +197,28 @@ func handleMessageRead(data map[string]interface{}, roomID string) {
 	for _, c := range roomConnections[roomID] {
 		if err := c.WriteJSON(msg); err != nil {
 			log.Println("WriteJSON error (message_read):", err)
+		}
+	}
+}
+
+func BroadcastMentionNotification(roomID int, mentionedUserID int, senderID int, content string) {
+	fmt.Println("📣 mention通知実行：", mentionedUserID, "にメンションされました")
+	msg := map[string]interface{}{
+		"type":      "mention",
+		"user_id":   mentionedUserID,
+		"sender_id": senderID,
+		"room_id":   roomID,
+		"message":   content,
+		"timestamp": time.Now().Format(time.RFC3339),
+	}
+
+	roomIDStr := strconv.Itoa(roomID)
+
+	mu.Lock()
+	defer mu.Unlock()
+	for _, conn := range roomConnections[roomIDStr] {
+		if err := conn.WriteJSON(msg); err != nil {
+			log.Println("WriteJSON error (mention):", err)
 		}
 	}
 }
