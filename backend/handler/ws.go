@@ -222,3 +222,17 @@ func BroadcastMentionNotification(roomID int, mentionedUserID int, senderID int,
 		}
 	}
 }
+
+func BroadcastToRoom(roomID int, data interface{}) {
+	roomStr := strconv.Itoa(roomID)
+	log.Println("📡 Broadcasting to room:", roomStr)
+	mu.Lock()
+	defer mu.Unlock()
+	for _, conn := range roomConnections[roomStr] {
+		log.Println("📨 sending to one conn")
+		if err := conn.WriteJSON(data); err != nil {
+			log.Println("❌ WebSocket送信失敗:", err)
+		}
+	}
+
+}

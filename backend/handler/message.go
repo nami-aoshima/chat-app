@@ -3,6 +3,7 @@ package handler
 import (
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
 	"regexp"
 	"strconv"
@@ -25,6 +26,8 @@ type MessageResponse struct {
 	Content   string `json:"content"`    // メッセージ本文
 	CreatedAt string `json:"created_at"` // 作成日時
 	ReadBy    []int  `json:"read_by"`    // 既読ユーザーのID配列
+	Edited    bool   `json:"edited"`     // 👈 編集されたかどうか
+	IsDeleted bool   `json:"is_deleted"` // 👈 削除されたかどうか
 }
 
 func extractMentions(content string) []string {
@@ -128,8 +131,8 @@ func GetMessagesHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	query := `SELECT id, room_id, sender_id, content, created_at 
-				FROM messages WHERE room_id = $1 ORDER BY created_at ASC`
+	query := `SELECT id, room_id, sender_id, content, created_at, edited_at, is_deleted
+		  FROM messages WHERE room_id = $1 ORDER BY created_at ASC`
 
 	rows, err := db.Query(query, roomID)
 	if err != nil {
@@ -143,17 +146,20 @@ func GetMessagesHandler(w http.ResponseWriter, r *http.Request) {
 		var (
 			msg       MessageResponse
 			createdAt time.Time
+			editedAt  *time.Time
 		)
-		if err := rows.Scan(&msg.ID, &msg.RoomID, &msg.SenderID, &msg.Content, &createdAt); err != nil {
+
+		// ここで edited_at と is_deleted も含めてスキャン
+		if err := rows.Scan(&msg.ID, &msg.RoomID, &msg.SenderID, &msg.Content, &createdAt, &editedAt, &msg.IsDeleted); err != nil {
 			http.Error(w, "Failed to parse messages", http.StatusInternalServerError)
 			return
 		}
 		msg.CreatedAt = createdAt.Format(time.RFC3339)
+		msg.Edited = (editedAt != nil) // 編集されたかどうかの判定
 
-		// ⭐ 空配列で初期化（←ここが重要！）
 		msg.ReadBy = []int{}
 
-		// 📥 read_by（既読ユーザーID一覧）を取得
+		// 既読ユーザーID一覧の取得
 		readQuery := `SELECT user_id FROM message_reads WHERE message_id = $1`
 		readRows, err := db.Query(readQuery, msg.ID)
 		if err != nil {
@@ -176,9 +182,7 @@ func GetMessagesHandler(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(messages)
 }
 
-// ------------------------------
-// 🌐 POST / GET を切り分けるルーター
-// ------------------------------
+// ← 今これがないので、新しく作ろう！
 func MessagesRouter(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodPost:
@@ -188,4 +192,121 @@ func MessagesRouter(w http.ResponseWriter, r *http.Request) {
 	default:
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 	}
+}
+
+// ------------------------------
+// 🌐 POST / GET を切り分けるルーター
+// ------------------------------
+func MessagesByIDRouter(w http.ResponseWriter, r *http.Request) {
+	idStr := strings.TrimPrefix(r.URL.Path, "/messages/")
+
+	switch r.Method {
+	case http.MethodPut:
+		EditMessageHandler(w, r, idStr)
+	case http.MethodDelete:
+		DeleteMessageHandler(w, r, idStr)
+	default:
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+func EditMessageHandler(w http.ResponseWriter, r *http.Request, messageIDStr string) {
+	userIDStr, err := GetUserIDFromToken(r)
+	if err != nil {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+	userID, _ := strconv.Atoi(userIDStr)
+
+	messageID, err := strconv.Atoi(messageIDStr)
+	if err != nil {
+		http.Error(w, "Invalid message ID", http.StatusBadRequest)
+		return
+	}
+
+	var input struct {
+		Content string `json:"content"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+		http.Error(w, "Invalid input", http.StatusBadRequest)
+		return
+	}
+
+	query := `
+		UPDATE messages 
+		SET content = $1, edited_at = NOW()
+		WHERE id = $2 AND sender_id = $3
+	`
+	_, err = db.Exec(query, input.Content, messageID, userID)
+	if err != nil {
+		http.Error(w, "Failed to update message", http.StatusInternalServerError)
+		return
+	}
+
+	// メッセージ編集が成功したあと、WebSocketで全クライアントに通知
+
+	// 編集されたメッセージ情報を再取得
+	var updatedMsg MessageResponse
+	var createdAt time.Time
+	var editedAt *time.Time
+	var isDeleted bool
+	var roomID int
+	err = db.QueryRow(`SELECT room_id, sender_id, content, created_at, edited_at, is_deleted FROM messages WHERE id = $1`, messageID).
+		Scan(&roomID, &updatedMsg.SenderID, &updatedMsg.Content, &createdAt, &editedAt, &isDeleted)
+	if err != nil {
+		log.Println("❌ メッセージ取得失敗:", err)
+	} else {
+		updatedMsg.ID = messageID
+		updatedMsg.RoomID = roomID
+		updatedMsg.CreatedAt = createdAt.Format(time.RFC3339)
+		updatedMsg.Edited = editedAt != nil
+		updatedMsg.IsDeleted = isDeleted
+		updatedMsg.ReadBy = []int{} // クライアントで保持しているので空でOK
+
+		BroadcastToRoom(roomID, map[string]interface{}{
+			"type":    "edit_message",
+			"message": updatedMsg,
+		})
+	}
+	log.Println("🔊 Broadcasting edited message to room:", roomID)
+
+	w.WriteHeader(http.StatusOK)
+
+}
+
+func DeleteMessageHandler(w http.ResponseWriter, r *http.Request, messageIDStr string) {
+	userIDStr, err := GetUserIDFromToken(r)
+	if err != nil {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+	userID, _ := strconv.Atoi(userIDStr)
+
+	messageID, err := strconv.Atoi(messageIDStr)
+	if err != nil {
+		http.Error(w, "Invalid message ID", http.StatusBadRequest)
+		return
+	}
+
+	query := `
+		UPDATE messages 
+		SET is_deleted = TRUE
+		WHERE id = $1 AND sender_id = $2
+	`
+	_, err = db.Exec(query, messageID, userID)
+	if err != nil {
+		http.Error(w, "Failed to delete message", http.StatusInternalServerError)
+		return
+	}
+	// 削除対象のメッセージのroom_idを取得
+	var roomID int
+	err = db.QueryRow(`SELECT room_id FROM messages WHERE id = $1`, messageID).Scan(&roomID)
+	if err == nil {
+		BroadcastToRoom(roomID, map[string]interface{}{
+			"type":       "delete_message",
+			"message_id": messageID,
+		})
+	}
+
+	w.WriteHeader(http.StatusOK)
 }

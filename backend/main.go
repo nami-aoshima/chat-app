@@ -23,8 +23,9 @@ func main() {
 	http.HandleFunc("/my_rooms", handler.WithCORS(handler.GetMyRoomsHandler))
 	http.HandleFunc("/room_members", handler.WithCORS(handler.GetRoomMembersHandler))
 
-	http.HandleFunc("/messages", handler.WithCORS(handler.MessagesRouter)) // メッセージ送信・取得の処理（POST/GETで分ける）
-	// main.go
+	http.HandleFunc("/messages", handler.WithCORS(handler.MessagesRouter))
+	http.HandleFunc("/messages/", handler.WithCORS(handler.MessagesByIDRouter))
+
 	http.HandleFunc("/api/profile", handler.WithCORS(handler.UpdateProfileHandler))
 	http.HandleFunc("/ws", handler.WebSocketHandler) // CORS不要（WebSocketは独自にオリジン許可している）
 	http.HandleFunc("/create_group", handler.WithCORS(handler.CreateGroupHandler))
