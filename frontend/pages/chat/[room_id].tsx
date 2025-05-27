@@ -17,6 +17,8 @@ type Message = {
   content: string;
   created_at: string;
   read_by?: number[];
+  edited?: boolean;
+  is_deleted?: boolean;
 };
 
 export default function ChatRoomPage() {
@@ -75,6 +77,33 @@ export default function ChatRoomPage() {
 
       ws.onmessage = (event) => {
         const data = JSON.parse(event.data);
+        console.log("📥 WebSocket受信:", data);
+if (data.type === "edit_message") {
+    const edited = data.message as Message;
+    setMessages((prev) =>
+      prev.map((m) =>
+        m.id === edited.id
+          ? { ...m, content: edited.content, edited: true }
+          : m
+      )
+    );
+    return;
+  }
+
+  if (data.type === "delete_message") {
+    const deletedId = data.message_id;
+    setMessages((prev) =>
+      prev.map((m) =>
+        m.id === deletedId
+          ? { ...m, is_deleted: true }
+          : m
+      )
+    );
+    return;
+  }
+
+
+
 
         if (data.type === "message") {
           const newMsg: Message = data;
@@ -225,6 +254,8 @@ export default function ChatRoomPage() {
     }
   };
 
+  
+
   // ...（以下UI部分は変更不要）
 
 
@@ -257,6 +288,55 @@ export default function ChatRoomPage() {
     }
   } catch {
     alert("画像アップロードに失敗しました");
+  }
+};
+
+const [openMenuId, setOpenMenuId] = useState<number | null>(null);
+
+const toggleMenu = (id: number) => {
+  setOpenMenuId(prev => (prev === id ? null : id));
+};
+
+const handleEdit = async (msg: Message) => {
+  const newContent = prompt("新しいメッセージ内容を入力", msg.content);
+  if (!newContent || newContent === msg.content) return;
+
+  try {
+    await fetch(`http://localhost:8081/messages/${msg.id}`, {
+      method: "PUT",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({ content: newContent }),
+    });
+
+    setMessages(prev =>
+      prev.map(m => m.id === msg.id ? { ...m, content: newContent, edited: true } : m)
+    );
+    setOpenMenuId(null);
+  } catch {
+    alert("編集に失敗しました");
+  }
+};
+
+const handleDelete = async (id: number) => {
+  if (!confirm("このメッセージを削除しますか？")) return;
+
+  try {
+    await fetch(`http://localhost:8081/messages/${id}`, {
+      method: "DELETE",
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+    });
+
+    setMessages(prev =>
+      prev.map(m => m.id === id ? { ...m, is_deleted: true } : m)
+    );
+    setOpenMenuId(null);
+  } catch {
+    alert("削除に失敗しました");
   }
 };
 
@@ -336,146 +416,191 @@ export default function ChatRoomPage() {
                   
         </aside>
 
-        <main style={{ flex: 1, display: "flex", flexDirection: "column", padding: "2rem", backgroundColor: "#ffffff", overflowY: "auto" }}>
-          <div style={{ fontSize: "1.4rem", fontWeight: "bold", color: "#2d3142", marginBottom: "1.2rem", borderBottom: "1px solid #eee", paddingBottom: "0.5rem", textAlign: "left" }}>
-            {currentRoom?.display_name ?? `ルーム #${room_id}`}
-          </div>
+  <main style={{ flex: 1, display: "flex", flexDirection: "column", padding: "2rem", backgroundColor: "#ffffff", overflowY: "auto" }}>
+  <div style={{ fontSize: "1.4rem", fontWeight: "bold", color: "#2d3142", marginBottom: "1.2rem", borderBottom: "1px solid #eee", paddingBottom: "0.5rem", textAlign: "left" }}>
+    {currentRoom?.display_name ?? `ルーム #${room_id}`}
+  </div>
 
-          {error && <p style={{ color: "red", textAlign: "center", marginBottom: "1rem" }}>{error}</p>}
+  {error && (
+    <p style={{ color: "red", textAlign: "center", marginBottom: "1rem" }}>{error}</p>
+  )}
 
-          <div style={{ flex: 1, overflowY: "auto", display: "flex", flexDirection: "column", gap: "0.75rem", padding: "1rem 0.5rem", borderRadius: "10px", marginBottom: "1.5rem" }}>
-            {messages.map((msg, index) => {
-              const currentDate = new Date(msg.created_at);
-              const previousDate = index > 0 ? new Date(messages[index - 1].created_at) : null;
-              const showDateSeparator = !previousDate || currentDate.toDateString() !== previousDate.toDateString();
-              const isImage = msg.content.match(/\.(jpg|jpeg|png|gif)$/i) || msg.content.startsWith("/uploads/");
-              const readers = (msg.read_by ?? []).filter(id => id !== userId);
+  <div style={{ flex: 1, overflowY: "auto", display: "flex", flexDirection: "column", gap: "0.75rem", padding: "1rem 0.5rem", borderRadius: "10px", marginBottom: "1.5rem" }}>
+    {messages.map((msg, index) => {
+      const currentDate = new Date(msg.created_at);
+      const previousDate = index > 0 ? new Date(messages[index - 1].created_at) : null;
+      const showDateSeparator = !previousDate || currentDate.toDateString() !== previousDate.toDateString();
+      const isImage = msg.content.match(/\.(jpg|jpeg|png|gif)$/i) || msg.content.startsWith("/uploads/");
+      const readers = (msg.read_by ?? []).filter(id => id !== userId);
+      const isMine = msg.sender_id === userId;
 
-              return (
-                <div key={`msg-${msg.id}`} style={{ marginBottom: "1.2rem" }}>
-                  {showDateSeparator && (
-                    <div style={{ textAlign: "center", margin: "1rem 0", color: "#888", fontSize: "0.9rem", fontWeight: "bold" }}>
-                      {currentDate.toLocaleDateString("ja-JP", { month: "numeric", day: "numeric", weekday: "short" })}
-                    </div>
-                  )}
+      return (
+        <div key={`msg-${msg.id}`} style={{ marginBottom: "1.2rem" }}>
+          {showDateSeparator && (
+            <div style={{ textAlign: "center", margin: "1rem 0", color: "#888", fontSize: "0.9rem", fontWeight: "bold" }}>
+              {currentDate.toLocaleDateString("ja-JP", { month: "numeric", day: "numeric", weekday: "short" })}
+            </div>
+          )}
 
-                  <div style={{ display: "flex", flexDirection: "column", alignItems: msg.sender_id === userId ? "flex-end" : "flex-start" }}>
-                    {isImage ? (
-                      <img
-                        src={`http://localhost:8081${msg.content}`}
-                        alt="画像"
-                        style={{ maxWidth: "70%", borderRadius: "8px" }}
-                      />
-                    ) : (
-                      <div style={{
-                        maxWidth: "70%",
-                        padding: "0.75rem 1rem",
-                        borderRadius: "16px",
-                        fontSize: "1rem",
-                        lineHeight: "1.4",
-                        boxShadow: "0 1px 4px rgba(0,0,0,0.04)",
-                        backgroundColor: msg.sender_id === userId ? "#f0616d" : "#e6e9f0",
-                        color: msg.sender_id === userId ? "#fff" : "#2d3142",
+          <div style={{
+            display: "flex",
+            alignItems: "flex-end",
+            justifyContent: isMine ? "flex-end" : "flex-start",
+            position: "relative"
+          }}>
+            {!isMine && <div style={{ width: 24, marginRight: 8 }} />}
+            {msg.is_deleted ? (
+              <div style={{ fontStyle: "italic", color: "#6b7280", fontSize: "0.9rem", textAlign: "center", margin: "0 auto" }}>
+                このメッセージは削除されました
+              </div>
+            ) : (
+              
+              
+              <div style={{
+                maxWidth: "70%",
+                padding: "0.75rem 1rem",
+                borderRadius: "16px",
+                fontSize: "1rem",
+                lineHeight: "1.4",
+                boxShadow: "0 1px 4px rgba(0,0,0,0.04)",
+                backgroundColor: isMine ? "#f0616d" : "#e6e9f0",
+                color: isMine ? "#fff" : "#2d3142",
+                position: "relative",
+              }}>
+                {isImage ? (
+                  <img
+                    src={`http://localhost:8081${msg.content}`}
+                    alt="画像"
+                    style={{ maxWidth: "100%", borderRadius: "8px" }}
+                  />
+                ) : (
+                  <>
+                    <span>{msg.content}</span>
+                    {msg.edited && (
+                      <span style={{
+position: "absolute",
+        top: "-1.2rem",
+        right: isMine ? "0" : "auto",
+        left: isMine ? "auto" : "0",
+        fontSize: "0.7rem",
+        color: "#6b7280",
+        fontStyle: "normal",
                       }}>
-                        <span>{msg.content}</span>
-                      </div>
+                        編集済
+                      </span>
                     )}
+                  </>
+                )}
+              </div>
+            )}
 
-                    <div style={{
-                      fontSize: "0.7rem",
-                      textAlign: "right",
-                      opacity: 0.6,
-                      marginTop: "0.3rem",
-                      display: "flex",
-                      gap: "0.5rem"
-                    }}>
-                      {msg.sender_id === userId && readers.length > 0 && (
-                        <span style={{ color: "#888" }}>
-                          {readers.length === 1 ? "既読" : `既読${readers.length}`}
-                        </span>
-                      )}
-                      <span>{currentDate.toLocaleTimeString("ja-JP", { hour: "2-digit", minute: "2-digit", hour12: false })}</span>
-                    </div>
+            {isMine && !msg.is_deleted && (
+              <div style={{ margin: 8, cursor: "pointer", color: "#6b7280", fontSize: "18px" }} onClick={() => toggleMenu(msg.id)}>
+                ⋮
+                {openMenuId === msg.id && (
+                  <div style={{
+                    position: "absolute",
+                    top: "24px",
+                    right: 0,
+                    backgroundColor: "#fff",
+                    border: "1px solid #ccc",
+                    borderRadius: "8px",
+                    boxShadow: "0 4px 8px rgba(0,0,0,0.1)",
+                    minWidth: "120px",
+                    zIndex: 100
+                  }}>
+                    <button onClick={() => handleEdit(msg)} style={{ padding: "0.5rem 1rem", border: "none", background: "none", width: "100%", textAlign: "left", cursor: "pointer" }}>
+                      編集
+                    </button>
+                    <hr style={{ margin: 0, borderColor: "#eee" }} />
+                    <button onClick={() => handleDelete(msg.id)} style={{ padding: "0.5rem 1rem", border: "none", background: "none", width: "100%", textAlign: "left", cursor: "pointer" }}>
+                      削除
+                    </button>
                   </div>
-                </div>
-              );
-            })}
-            <div ref={messageEndRef} />
+                )}
+              </div>
+            )}
           </div>
 
-          <form
-  onSubmit={handleSend}
-  style={{
-    display: "flex",
-    gap: "0.5rem",
-    marginTop: "auto",
-    alignItems: "center",
-  }}
->
-  <input
-    type="text"
-    value={input}
-    onChange={(e) => setInput(e.target.value)}
-    placeholder="メッセージを入力"
-    style={{
-      flex: 1,
-      padding: "0.75rem",
-      borderRadius: "8px",
-      border: "1px solid #ccc",
-      fontSize: "1rem",
-    }}
-  />
+          {!msg.is_deleted && (
+            <div style={{
+              fontSize: "0.7rem",
+              textAlign: isMine ? "right" : "left",
+              opacity: 0.9,
+              marginTop: "0.3rem",
+              display: "flex",
+              justifyContent: isMine ? "flex-end" : "flex-start",
+              gap: "0.5rem",
+              paddingLeft: isMine ? undefined : "1.5rem",
+              color: "#6b7280",
+            }}>
+              {isMine && readers.length > 0 && (
+                <span style={{ color: "#6b7280", fontWeight: 500 }}>
+                  {readers.length === 1 ? "既読" : `既読${readers.length}`}
+                </span>
+              )}
+              <span>{currentDate.toLocaleTimeString("ja-JP", { 
+                hour: "2-digit", 
+                minute: "2-digit", 
+                hour12: false 
+                })}
+                </span>
+            </div>
+          )}
+        </div>
+      );
+    })}
+    <div ref={messageEndRef} />
+  </div>
 
-  {/* 画像ボタン（薄ピンク） */}
-  <label
-    htmlFor="file-upload"
-    style={{
-      backgroundColor: "#ffecec",
-      color: "#2d3142",
-      padding: "0.6rem 1rem",
-      borderRadius: "8px",
-      cursor: "pointer",
-      fontWeight: 600,
-      fontSize: "0.9rem",
-      border: "1px solid #f1dcdc",
-      transition: "background-color 0.2s ease",
-    }}
-    onMouseOver={(e) => (e.currentTarget.style.backgroundColor = "#fcdcdc")}
-    onMouseOut={(e) => (e.currentTarget.style.backgroundColor = "#ffecec")}
-  >
-     ファイルを選択
-  </label>
-  <input
-    id="file-upload"
-    type="file"
-    accept="image/*"
-    onChange={handleImageUpload}
-    style={{ display: "none" }}
-  />
 
-  {/* 送信ボタン（同じ形状で濃い色） */}
-  <button
-    type="submit"
-    style={{
-      padding: "0.6rem 1rem",
-      backgroundColor: "#f0616d",
-      color: "white",
-      border: "none",
-      borderRadius: "8px",
-      cursor: "pointer",
-      fontWeight: 600,
-      fontSize: "0.9rem",
-      transition: "background-color 0.2s ease",
-    }}
-    onMouseOver={(e) => (e.currentTarget.style.backgroundColor = "#e45763")}
-    onMouseOut={(e) => (e.currentTarget.style.backgroundColor = "#f0616d")}
-  >
-    送信
-  </button>
-</form>
-
-        </main>
-      </div>
-    </div>
-  );
-}
+      {/* 入力フォーム */}
+      <form onSubmit={handleSend} style={{
+        display: "flex",
+        gap: "0.5rem",
+        marginTop: "auto",
+        alignItems: "center",
+      }}>
+        <input
+          type="text"
+          value={input}
+          onChange={(e) => setInput(e.target.value)}
+          placeholder="メッセージを入力"
+          style={{
+            flex: 1,
+            padding: "0.75rem",
+            borderRadius: "8px",
+            border: "1px solid #ccc",
+            fontSize: "1rem",
+          }}
+        />
+        <label htmlFor="file-upload" style={{
+          backgroundColor: "#ffecec",
+          color: "#2d3142",
+          padding: "0.6rem 1rem",
+          borderRadius: "8px",
+          cursor: "pointer",
+          fontWeight: 600,
+          fontSize: "0.9rem",
+          border: "1px solid #f1dcdc",
+        }}>
+          ファイル
+        </label>
+        <input id="file-upload" type="file" accept="image/*" onChange={handleImageUpload} style={{ display: "none" }} />
+        <button type="submit" style={{
+          padding: "0.6rem 1rem",
+          backgroundColor: "#f0616d",
+          color: "white",
+          border: "none",
+          borderRadius: "8px",
+          cursor: "pointer",
+          fontWeight: 600,
+          fontSize: "0.9rem",
+        }}>
+          送信
+        </button>
+      </form>
+    </main>
+  </div>
+  </div>
+)}
