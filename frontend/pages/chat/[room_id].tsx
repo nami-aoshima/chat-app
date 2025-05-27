@@ -33,42 +33,14 @@ export default function ChatRoomPage() {
   const [error, setError] = useState("");
 
   const messageEndRef = useRef<HTMLDivElement | null>(null);
-  const socketRef = useRef<WebSocket | null>(null);
+  const socketMapRef = useRef<Map<number, WebSocket>>(new Map());
+  const roomIdRef = useRef<string | undefined>(undefined);
 
   useEffect(() => {
-    if (!room_id || typeof room_id !== "string" || !token) return;
-
-    const socket = new WebSocket(`ws://localhost:8081/ws?room_id=${room_id}&token=${token}`);
-    socketRef.current = socket;
-
-    socket.onopen = () => console.log("✅ WebSocket connected");
-
-    socket.onmessage = (event) => {
-      const data = JSON.parse(event.data);
-      if (data.type === "message_read") {
-        const { message_id, user_id } = data;
-        setMessages((prev) =>
-          prev.map((msg) =>
-            msg.id === message_id && !msg.read_by?.includes(user_id)
-              ? { ...msg, read_by: [...(msg.read_by || []), user_id] }
-              : msg
-          )
-        );
-      } else {
-        const newMsg: Message = data;
-        if (newMsg.sender_id !== userId) {
-          setMessages((prev) =>
-            prev.some((msg) => msg.id === newMsg.id) ? prev : [...prev, newMsg]
-          );
-        }
-      }
-    };
-
-    socket.onclose = () => console.log("🔌 WebSocket disconnected");
-    socket.onerror = (e) => console.error("❌ WebSocket error:", e);
-
-    return () => socket.close();
-  }, [room_id, token, userId]);
+    if (typeof room_id === "string") {
+      roomIdRef.current = room_id;
+    }
+  }, [room_id]);
 
   useEffect(() => {
     if (!token) return;
@@ -85,6 +57,76 @@ export default function ChatRoomPage() {
       )
       .catch(() => setRooms([]));
   }, [token]);
+
+  useEffect(() => {
+    if (!token || rooms.length === 0) return;
+
+    rooms.forEach((room) => {
+      const roomId = room.room_id;
+      if (socketMapRef.current.has(roomId)) return;
+
+      const ws = new WebSocket(`ws://localhost:8081/ws?room_id=${roomId}&token=${token}`);
+
+      ws.onopen = () => {
+        console.log(`✅ WS OPEN: room ${roomId}`);
+      };
+
+      ws.onmessage = (event) => {
+        const data = JSON.parse(event.data);
+
+        if (data.type === "message") {
+          const newMsg: Message = data;
+          const isCurrentRoom = String(newMsg.room_id) === roomIdRef.current;
+
+          if (newMsg.sender_id !== userId) {
+            if (isCurrentRoom) {
+              setMessages((prev) =>
+                prev.some((m) => m.id === newMsg.id) ? prev : [...prev, newMsg]
+              );
+            } else {
+              setRooms((prev) =>
+                prev.map((r) =>
+                  r.room_id === newMsg.room_id ? { ...r, unread_count: r.unread_count + 1 } : r
+                )
+              );
+            }
+          }
+        } else if (data.type === "message_read") {
+          const { message_id, user_id, room_id: readRoomId } = data;
+
+          if (String(readRoomId) === roomIdRef.current) {
+            setMessages((prev) =>
+              prev.map((msg) =>
+                msg.id === message_id && !msg.read_by?.includes(user_id)
+                  ? { ...msg, read_by: [...(msg.read_by || []), user_id] }
+                  : msg
+              )
+            );
+          }
+
+          // バッジ減らす（他ルーム）
+          setRooms((prevRooms) =>
+  prevRooms.map((room) => {
+    if (String(room.room_id) === roomIdRef.current) {
+      return { ...room, unread_count: 0 };
+    }
+    return room;
+  })
+);
+        }
+      };
+
+      ws.onclose = () => console.log(`🔌 WS CLOSED: room ${roomId}`);
+      ws.onerror = (e) => console.error("❌ WebSocket error:", e);
+
+      socketMapRef.current.set(roomId, ws);
+    });
+
+    return () => {
+      socketMapRef.current.forEach((s) => s.close());
+      socketMapRef.current.clear();
+    };
+  }, [rooms, token]);
 
   useEffect(() => {
     if (!token || typeof room_id !== "string") return;
@@ -104,7 +146,9 @@ export default function ChatRoomPage() {
   }, [messages]);
 
   useEffect(() => {
-    if (!messages.length || !token || !userId || !socketRef.current) return;
+    if (!messages.length || !token || !userId) return;
+    const currentRoomId = parseInt(room_id as string);
+    const socket = socketMapRef.current.get(currentRoomId);
 
     const unreadMessages = messages.filter(
       (msg) =>
@@ -112,16 +156,19 @@ export default function ChatRoomPage() {
         (!msg.read_by || !msg.read_by.includes(userId))
     );
 
-    unreadMessages.forEach((msg) => {
-      socketRef.current?.send(
-        JSON.stringify({
-          type: "message_read",
-          message_id: msg.id,
-          user_id: userId,
-        })
-      );
-    });
-  }, [messages, token, userId]);
+    if (socket && socket.readyState === WebSocket.OPEN) {
+      unreadMessages.forEach((msg) => {
+        socket.send(
+          JSON.stringify({
+            type: "message_read",
+            message_id: msg.id,
+            user_id: userId,
+            room_id: currentRoomId,
+          })
+        );
+      });
+    }
+  }, [messages, token, userId, room_id]);
 
   const sendMessage = async (content: string) => {
     try {
@@ -142,42 +189,51 @@ export default function ChatRoomPage() {
       const newMsg: Message = await res.json();
 
       setMessages((prev) => [...prev, newMsg]);
-      socketRef.current?.send(JSON.stringify({ ...newMsg, type: "message" }));
+      const socket = socketMapRef.current.get(parseInt(room_id as string));
+      if (socket && socket.readyState === WebSocket.OPEN) {
+        socket.send(JSON.stringify({ ...newMsg, type: "message" }));
+      }
     } catch {
       setError("送信に失敗しました");
     }
   };
 
-  const handleSend = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!input.trim() || typeof room_id !== "string") return;
-    await sendMessage(input);
-    setInput("");
-  };
+  // ...（以下UI部分は変更不要）
 
-  const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
-    const formData = new FormData();
-    formData.append("image", file);
-
-    try {
-      const res = await fetch("http://localhost:8081/upload", {
-        method: "POST",
-        body: formData,
-      });
-
-      const data = await res.json();
-      if (data.url) {
-        await sendMessage(data.url);
-      }
-    } catch {
-      alert("画像アップロードに失敗しました");
-    }
-  };
 
   const currentRoom = rooms.find((room) => String(room.room_id) === String(room_id));
+
+  const handleSend = async (e: React.FormEvent) => {
+  e.preventDefault();
+  if (!input.trim() || typeof room_id !== "string") return;
+  await sendMessage(input);
+  setInput("");
+};
+
+
+  const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+  const file = e.target.files?.[0];
+  if (!file) return;
+
+  const formData = new FormData();
+  formData.append("image", file);
+
+  try {
+    const res = await fetch("http://localhost:8081/upload", {
+      method: "POST",
+      body: formData,
+    });
+
+    const data = await res.json();
+    if (data.url) {
+      await sendMessage(data.url);
+    }
+  } catch {
+    alert("画像アップロードに失敗しました");
+  }
+};
+
+
 
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100vh", fontFamily: "system-ui, sans-serif" }}>

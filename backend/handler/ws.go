@@ -6,6 +6,8 @@ import (
 	"net/http"
 	"sync"
 
+	"strconv"
+
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/gorilla/websocket"
 )
@@ -99,15 +101,26 @@ func WebSocketHandler(w http.ResponseWriter, r *http.Request) {
 
 // 新規メッセージ処理（保存はせず、ブロードキャストのみ）
 func handleNewMessage(data map[string]interface{}, conn *websocket.Conn, roomID string) {
+	data["type"] = "message" //
+
 	var msg MessageResponse
 	b, _ := json.Marshal(data)
 	json.Unmarshal(b, &msg)
 
+	roomInt, err := strconv.Atoi(roomID)
+	if err != nil {
+		log.Println("Invalid roomID:", roomID)
+		return
+	}
+
+	msg.RoomID = roomInt
+
 	mu.Lock()
 	defer mu.Unlock()
+
 	for _, c := range roomConnections[roomID] {
 		if c != conn {
-			if err := c.WriteJSON(msg); err != nil {
+			if err := c.WriteJSON(data); err != nil {
 				log.Println("WriteJSON error:", err)
 			}
 		}
@@ -135,11 +148,18 @@ func handleMessageRead(data map[string]interface{}, roomID string) {
 		return
 	}
 
+	roomInt, err := strconv.Atoi(roomID)
+	if err != nil {
+		log.Println("Invalid roomID:", roomID)
+		return
+	}
+
 	// 全クライアントに通知
 	msg := map[string]interface{}{
 		"type":       "message_read",
 		"message_id": messageID,
 		"user_id":    userID,
+		"room_id":    roomInt,
 	}
 
 	mu.Lock()

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strconv"
 	"time"
 )
 
@@ -28,7 +29,17 @@ type MessageResponse struct {
 // 📮 メッセージ保存処理（POST）
 // ------------------------------
 func SendMessageHandler(w http.ResponseWriter, r *http.Request) {
-	var msg Message
+	userIDStr, err := GetUserIDFromToken(r)
+	if err != nil {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+	userID, _ := strconv.Atoi(userIDStr)
+
+	var msg struct {
+		RoomID  int    `json:"room_id"`
+		Content string `json:"content"`
+	}
 	if err := json.NewDecoder(r.Body).Decode(&msg); err != nil {
 		http.Error(w, "Invalid input", http.StatusBadRequest)
 		return
@@ -40,7 +51,7 @@ func SendMessageHandler(w http.ResponseWriter, r *http.Request) {
 	var messageID int
 	var createdAt time.Time
 
-	err := db.QueryRow(query, msg.RoomID, msg.SenderID, msg.Content).Scan(&messageID, &createdAt)
+	err = db.QueryRow(query, msg.RoomID, userID, msg.Content).Scan(&messageID, &createdAt)
 	if err != nil {
 		http.Error(w, fmt.Sprintf("Error sending message: %s", err), http.StatusInternalServerError)
 		return
@@ -49,10 +60,10 @@ func SendMessageHandler(w http.ResponseWriter, r *http.Request) {
 	res := MessageResponse{
 		ID:        messageID,
 		RoomID:    msg.RoomID,
-		SenderID:  msg.SenderID,
+		SenderID:  userID, // ← tokenから取得した値！
 		Content:   msg.Content,
 		CreatedAt: createdAt.Format(time.RFC3339),
-		ReadBy:    []int{}, // POST時は空配列で返す
+		ReadBy:    []int{},
 	}
 
 	w.Header().Set("Content-Type", "application/json")
