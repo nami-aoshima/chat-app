@@ -20,7 +20,8 @@ type Message = {
   created_at: string;
   read_by?: number[];
   edited?: boolean;
-  is_deleted?: boolean;
+  is_deleted?: boolean;       // 送信取消（物理削除の通知用）
+  is_hidden_for?: number[];   // 各ユーザー向け非表示（論理削除）
 };
 
 export default function ChatRoomPage() {
@@ -98,17 +99,27 @@ if (data.type === "edit_message") {
   }
 
   if (data.type === "delete_message") {
-    const deletedId = data.message_id;
-    setMessages((prev) =>
-      prev.map((m) =>
-        m.id === deletedId
-          ? { ...m, is_deleted: true }
-          : m
-      )
-    );
-    return;
-  }
+  const deletedId = data.message_id;
+  setMessages((prev) =>
+    prev.map((m) =>
+      m.id === deletedId ? { ...m, is_deleted: true } : m
+    )
+  );
+  return;
+}
 
+
+if (data.type === "hide_message") {
+  const { message_id, user_id } = data;
+  setMessages((prev) =>
+    prev.map((m) =>
+      m.id === message_id
+        ? { ...m, is_hidden_for: [...(m.is_hidden_for || []), user_id] }
+        : m
+    )
+  );
+  return;
+}
 
 
 
@@ -365,6 +376,50 @@ const handleDelete = async (id: number) => {
     alert("削除に失敗しました");
   }
 };
+// 自分だけ削除
+const handleHideForMe = async (id: number) => {
+  try {
+    await fetch(`http://localhost:8081/messages/${id}/hide`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({ user_id: userId }),
+    });
+
+    setMessages((prev) =>
+      prev.map((m) =>
+        m.id === id
+          ? { ...m, is_hidden_for: [...(m.is_hidden_for || []), userId] }
+          : m
+      )
+    );
+    setOpenMenuId(null);
+  } catch {
+    alert("削除に失敗しました");
+  }
+};
+
+// 送信取消
+const handleRecall = async (id: number) => {
+  try {
+    await fetch(`http://localhost:8081/messages/${id}`, {
+      method: "DELETE",
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+    });
+
+    setMessages((prev) =>
+      prev.map((m) => (m.id === id ? { ...m, is_deleted: true } : m))
+    );
+    setOpenMenuId(null);
+  } catch {
+    alert("送信取消に失敗しました");
+  }
+};
+
 
 
 
@@ -461,6 +516,14 @@ const handleDelete = async (id: number) => {
       const isImage = msg.content.match(/\.(jpg|jpeg|png|gif)$/i) || msg.content.startsWith("/uploads/");
       const readers = (msg.read_by ?? []).filter(id => id !== userId);
       const isMine = msg.sender_id === userId;
+      // 自分に非表示のメッセージはスキップ
+
+
+// 自分に非表示のメッセージ or 自分による削除 → 完全に非表示
+if (msg.is_hidden_for?.includes(userId)) return null;
+
+
+
 
       return (
         <div key={`msg-${msg.id}`} style={{ marginBottom: "1.2rem" }}>
@@ -522,7 +585,7 @@ const handleDelete = async (id: number) => {
       textAlign: "center",
       margin: "0 auto"
     }}>
-      このメッセージは削除されました
+      メッセージの送信を取り消しました
     </div>
   ) : isImage ? (
     <img
@@ -583,48 +646,65 @@ const handleDelete = async (id: number) => {
     </div>
 
     {openMenuId === msg.id && (
-       <div ref={menuRef} style={{
+  <div ref={menuRef} style={{
     position: "absolute",
     top: "100%",
     right: 0,
     marginTop: "4px",
     backgroundColor: "#fff",
     border: "1px solid #ccc",
-    borderRadius: "8px",
-    boxShadow: "0 4px 8px rgba(0,0,0,0.1)",
-    minWidth: "120px",
+    borderRadius: "10px",
+    boxShadow: "0 4px 12px rgba(0,0,0,0.1)",
+    minWidth: "160px",
     zIndex: 100
   }}>
+    <button
+      onClick={() => handleEdit(msg)}
+      style={{
+        padding: "0.6rem 1rem",
+        fontSize: "0.9rem",
+        background: "none",
+        border: "none",
+        width: "100%",
+        textAlign: "left",
+        cursor: "pointer"
+      }}
+    >
+      編集
+    </button>
+    <hr style={{ margin: "0.25rem 0", borderColor: "#eee" }} />
+    <button
+      onClick={() => handleHideForMe(msg.id)}
+      style={{
+        padding: "0.6rem 1rem",
+        fontSize: "0.9rem",
+        background: "none",
+        border: "none",
+        width: "100%",
+        textAlign: "left",
+        cursor: "pointer"
+      }}
+    >
+      削除（自分だけ）
+    </button>
+    <hr style={{ margin: "0.25rem 0", borderColor: "#eee" }} />
+    <button
+      onClick={() => handleRecall(msg.id)}
+      style={{
+        padding: "0.6rem 1rem",
+        fontSize: "0.9rem",
+        background: "none",
+        border: "none",
+        width: "100%",
+        textAlign: "left",
+        cursor: "pointer"
+      }}
+    >
+      送信取り消し
+    </button>
+  </div>
+)}
 
-        <button
-          onClick={() => handleEdit(msg)}
-          style={{
-            padding: "0.5rem 1rem",
-            border: "none",
-            background: "none",
-            width: "100%",
-            textAlign: "left",
-            cursor: "pointer"
-          }}
-        >
-          編集
-        </button>
-        <hr style={{ margin: 0, borderColor: "#eee" }} />
-        <button
-          onClick={() => handleDelete(msg.id)}
-          style={{
-            padding: "0.5rem 1rem",
-            border: "none",
-            background: "none",
-            width: "100%",
-            textAlign: "left",
-            cursor: "pointer"
-          }}
-        >
-          削除
-        </button>
-      </div>
-    )}
   </div>
 )}
 

@@ -131,10 +131,20 @@ func GetMessagesHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	query := `SELECT id, room_id, sender_id, content, created_at, edited_at, is_deleted
-		  FROM messages WHERE room_id = $1 ORDER BY created_at ASC`
+	userIDStr, err := GetUserIDFromToken(r)
+	if err != nil {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+	userID, _ := strconv.Atoi(userIDStr)
 
-	rows, err := db.Query(query, roomID)
+	query := `
+	SELECT id, room_id, sender_id, content, created_at, edited_at, is_deleted
+	FROM messages 
+	WHERE room_id = $1 AND NOT ($2 = ANY(hidden_user_ids))
+	ORDER BY created_at ASC`
+	rows, err := db.Query(query, roomID, userID)
+
 	if err != nil {
 		http.Error(w, "Failed to fetch messages", http.StatusInternalServerError)
 		return
@@ -309,4 +319,49 @@ func DeleteMessageHandler(w http.ResponseWriter, r *http.Request, messageIDStr s
 	}
 
 	w.WriteHeader(http.StatusOK)
+}
+
+// 🚨 新しく追加するエンドポイント
+// POST /messages/{id}/hide
+func HideMessageForUser(w http.ResponseWriter, r *http.Request) {
+	// JWTからuserIDを取得
+	userIDStr, err := GetUserIDFromToken(r)
+	if err != nil {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+	userID, _ := strconv.Atoi(userIDStr)
+
+	// メッセージIDをURLから取得
+	messageIDStr := strings.TrimPrefix(r.URL.Path, "/messages/")
+	messageIDStr = strings.TrimSuffix(messageIDStr, "/hide")
+	messageID, err := strconv.Atoi(messageIDStr)
+	if err != nil {
+		http.Error(w, "Invalid message ID", http.StatusBadRequest)
+		return
+	}
+
+	// hidden_user_ids に userID を追加（重複しないように）
+	_, err = db.Exec(`
+		UPDATE messages 
+		SET hidden_user_ids = array_append(hidden_user_ids, $1)
+		WHERE id = $2 AND NOT ($1 = ANY(hidden_user_ids))
+	`, userID, messageID)
+	if err != nil {
+		http.Error(w, "Failed to hide message", http.StatusInternalServerError)
+		return
+	}
+
+	// WebSocketで通知（必要に応じて）
+	var roomID int
+	err = db.QueryRow(`SELECT room_id FROM messages WHERE id = $1`, messageID).Scan(&roomID)
+	if err == nil {
+		BroadcastToRoom(roomID, map[string]interface{}{
+			"type":       "hide_message",
+			"message_id": messageID,
+			"user_id":    userID,
+		})
+	}
+
+	w.WriteHeader(http.StatusNoContent)
 }
