@@ -2,6 +2,8 @@ import { useEffect, useState, useRef } from "react";
 import { useRouter } from "next/router";
 import { useAuthGuard } from "../../utils/authGuard";
 
+import EmojiPicker from "emoji-picker-react";
+
 type Room = {
   room_id: number;
   display_name: string;
@@ -39,6 +41,8 @@ export default function ChatRoomPage() {
   const messageEndRef = useRef<HTMLDivElement | null>(null);
   const socketMapRef = useRef<Map<number, WebSocket>>(new Map());
   const roomIdRef = useRef<string | undefined>(undefined);
+
+  const [showEmojiPicker, setShowEmojiPicker] = useState(false);
 
   useEffect(() => {
     if (typeof room_id === "string") {
@@ -553,53 +557,106 @@ position: "absolute",
     <div ref={messageEndRef} />
   </div>
 
-
       {/* 入力フォーム */}
-      <form onSubmit={handleSend} style={{
-        display: "flex",
-        gap: "0.5rem",
-        marginTop: "auto",
-        alignItems: "center",
-      }}>
-        <input
-          type="text"
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
-          placeholder="メッセージを入力"
-          style={{
-            flex: 1,
-            padding: "0.75rem",
-            borderRadius: "8px",
-            border: "1px solid #ccc",
-            fontSize: "1rem",
-          }}
-        />
-        <label htmlFor="file-upload" style={{
-          backgroundColor: "#ffecec",
-          color: "#2d3142",
-          padding: "0.6rem 1rem",
-          borderRadius: "8px",
-          cursor: "pointer",
-          fontWeight: 600,
-          fontSize: "0.9rem",
-          border: "1px solid #f1dcdc",
-        }}>
-          ファイル
-        </label>
-        <input id="file-upload" type="file" accept="image/*" onChange={handleImageUpload} style={{ display: "none" }} />
-        <button type="submit" style={{
-          padding: "0.6rem 1rem",
-          backgroundColor: "#f0616d",
-          color: "white",
-          border: "none",
-          borderRadius: "8px",
-          cursor: "pointer",
-          fontWeight: 600,
-          fontSize: "0.9rem",
-        }}>
-          送信
-        </button>
-      </form>
+<form onSubmit={handleSend} style={{
+  display: "flex",
+  flexDirection: "column",
+  gap: "0.5rem",
+  marginTop: "auto",
+  position: "relative"
+}}>
+  {/* 絵文字 & アップロードボタン（上段） */}
+  <div style={{
+    display: "flex",
+    gap: "1rem",
+    alignItems: "center",
+    paddingLeft: "0.5rem"
+  }}>
+    {/* 😊 ボタン */}
+    <button
+      type="button"
+      onClick={() => setShowEmojiPicker((prev) => !prev)}
+      style={{
+        background: "none",
+        border: "none",
+        fontSize: "1.3rem",
+        cursor: "pointer"
+      }}
+    >
+      😊
+    </button>
+
+    {/* 📎 アップロードボタン */}
+    <label htmlFor="file-upload" style={{
+      cursor: "pointer",
+      fontSize: "1.3rem"
+    }}>
+      📎
+    </label>
+    <input
+      id="file-upload"
+      type="file"
+      accept="image/*"
+      onChange={handleImageUpload}
+      style={{ display: "none" }}
+    />
+  </div>
+
+  {/* ピッカーの表示位置 */}
+  {showEmojiPicker && (
+    <div style={{
+      position: "absolute",
+      bottom: "4.5rem",
+      left: "1rem",
+      zIndex: 1000,
+      boxShadow: "0 4px 12px rgba(0, 0, 0, 0.15)"
+    }}>
+      <EmojiPicker
+        onEmojiClick={(emojiData) => {
+          setInput((prev) => prev + emojiData.emoji);
+          setShowEmojiPicker(false);
+        }}
+        autoFocusSearch={false}
+      />
+    </div>
+  )}
+
+  {/* 入力欄 + 送信（下段） */}
+  <div style={{
+    display: "flex",
+    alignItems: "center",
+    gap: "0.5rem"
+  }}>
+    <input
+      type="text"
+      value={input}
+      onChange={(e) => setInput(e.target.value)}
+      placeholder="メッセージを入力"
+      style={{
+        flex: 1,
+        padding: "0.75rem",
+        borderRadius: "12px",
+        border: "1px solid #ccc",
+        fontSize: "1rem"
+      }}
+    />
+    <button type="submit" style={{
+      padding: "0.6rem 1rem",
+      backgroundColor: "#f0616d",
+      color: "white",
+      border: "none",
+      borderRadius: "8px",
+      fontWeight: "bold",
+      fontSize: "0.9rem",
+      cursor: "pointer"
+    }}>
+      送信
+    </button>
+  </div>
+</form>
+
+
+
     </main>
   </div>
   </div>

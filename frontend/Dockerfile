@@ -7,14 +7,14 @@ WORKDIR /app
 # package.json と package-lock.json をコピー
 COPY package*.json ./
 
-# 依存関係のインストール
+# emoji-picker-react を含む依存関係のインストール
 RUN npm install
 
-# その他全ファイルをコピー
+# アプリの全コードをコピー
 COPY . .
 
 # 開発用ポートを公開
 EXPOSE 3000
 
-# 開発サーバー起動
+# Next.js の開発サーバーを起動
 CMD ["npm", "run", "dev"]
