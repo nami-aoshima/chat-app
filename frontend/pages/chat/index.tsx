@@ -147,6 +147,39 @@ export default function ChatHome() {
     setShowGroupForm(!showGroupForm);
   };
 
+  const handleDeleteRoom = async (roomId: number) => {
+  if (!confirm("このルームを削除しますか？")) return;
+
+  try {
+    const res = await fetch("http://localhost:8081/delete_room", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({ room_id: roomId }),
+    });
+
+    if (!res.ok) {
+      const text = await res.text();
+      alert("削除に失敗：" + text);
+      return;
+    }
+
+    // 成功したら再取得
+    const resRooms = await fetch("http://localhost:8081/my_rooms", {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    const roomsData = await resRooms.json();
+    setRooms(roomsData);
+    alert("ルームを削除しました");
+  } catch (e) {
+    alert("通信エラー");
+    console.error(e);
+  }
+};
+
+
   return (
     <div style={{ display: "flex", height: "100vh", flexDirection: "column", fontFamily: "system-ui, sans-serif" }}>
       <header style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "1rem 2rem", backgroundColor: "#fff", borderBottom: "1px solid #eee" }}>
@@ -190,10 +223,44 @@ export default function ChatHome() {
           ) : (
             <ul style={{ listStyle: "none", padding: 0, margin: 0, display: "flex", flexDirection: "column", gap: "0.75rem" }}>
               {rooms.map((room) => (
-                <li key={room.room_id}>
-                  <button onClick={() => router.push(`/chat/${room.room_id}`)} style={{ border: "none", outline: "none", display: "block", width: "100%", padding: "0.8rem 1rem", borderRadius: "12px", cursor: "pointer", fontWeight: 600, fontSize: "1rem", textAlign: "left", backgroundColor: String(room.room_id) === router.query.room_id ? "#f0616d" : "#ffecec", color: String(room.room_id) === router.query.room_id ? "#fff" : "#2d3142" }}>{room.display_name}</button>
-                </li>
-              ))}
+  <li key={room.room_id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+    <button
+      onClick={() => router.push(`/chat/${room.room_id}`)}
+      style={{
+        flexGrow: 1,
+        border: "none",
+        outline: "none",
+        padding: "0.8rem 1rem",
+        borderRadius: "12px",
+        cursor: "pointer",
+        fontWeight: 600,
+        fontSize: "1rem",
+        textAlign: "left",
+        backgroundColor: String(room.room_id) === router.query.room_id ? "#f0616d" : "#ffecec",
+        color: String(room.room_id) === router.query.room_id ? "#fff" : "#2d3142",
+        marginRight: "0.5rem",
+      }}
+    >
+      {room.display_name}
+    </button>
+    <button
+      onClick={() => handleDeleteRoom(room.room_id)}
+      title="ルーム削除"
+      style={{
+        backgroundColor: "#ffecec",
+        color: "#fff",
+        border: "none",
+        borderRadius: "8px",
+        padding: "0.4rem 0.6rem",
+        cursor: "pointer",
+      }}
+    >
+      🗑
+    </button>
+  </li>
+))}
+
+            
             </ul>
           )}
         </aside>

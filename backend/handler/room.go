@@ -170,9 +170,13 @@ func CreateGroupHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	query := `INSERT INTO chat_rooms (room_name, is_group, created_at) VALUES ($1, true, NOW()) RETURNING id`
+	query := `
+  INSERT INTO chat_rooms (room_name, is_group, created_by, created_at)
+  VALUES ($1, true, $2, NOW()) RETURNING id
+`
+
 	var roomID int
-	if err := db.QueryRow(query, req.GroupName).Scan(&roomID); err != nil {
+	if err := db.QueryRow(query, req.GroupName, userID).Scan(&roomID); err != nil {
 		http.Error(w, "Failed to create room", http.StatusInternalServerError)
 		return
 	}

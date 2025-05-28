@@ -41,6 +41,8 @@ func main() {
 	// --- その他 ---
 	http.HandleFunc("/upload", handler.WithCORS(handler.UploadImageHandler))
 	http.HandleFunc("/ws", handler.WebSocketHandler) // WebSocketはCORS不要
+	// --- チャットルーム関連 ---
+	http.HandleFunc("/delete_room", handler.WithCORS(handler.DeleteRoomHandler))
 
 	// サーバーログ表示
 	fmt.Println("Server started at http://localhost:8081")
