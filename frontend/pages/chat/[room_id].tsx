@@ -44,6 +44,9 @@ export default function ChatRoomPage() {
 
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
 
+  const menuRef = useRef<HTMLDivElement | null>(null);
+  const [openMenuId, setOpenMenuId] = useState<number | null>(null);
+
   useEffect(() => {
     if (typeof room_id === "string") {
       roomIdRef.current = room_id;
@@ -258,6 +261,25 @@ if (data.type === "edit_message") {
     }
   };
 
+  useEffect(() => {
+  const handleClickOutside = (event: MouseEvent) => {
+    if (
+      menuRef.current &&
+      !menuRef.current.contains(event.target as Node)
+    ) {
+      setOpenMenuId(null);
+    }
+  };
+
+  if (openMenuId !== null) {
+    document.addEventListener("mousedown", handleClickOutside);
+  }
+
+  return () => {
+    document.removeEventListener("mousedown", handleClickOutside);
+  };
+}, [openMenuId]);
+
   
 
   // ...（以下UI部分は変更不要）
@@ -295,7 +317,7 @@ if (data.type === "edit_message") {
   }
 };
 
-const [openMenuId, setOpenMenuId] = useState<number | null>(null);
+
 
 const toggleMenu = (id: number) => {
   setOpenMenuId(prev => (prev === id ? null : id));
@@ -400,8 +422,10 @@ const handleDelete = async (id: number) => {
       color: "#fff",
       fontSize: "0.75rem",
       borderRadius: "12px",
-      padding: "0.1rem 0.5rem",
+      border: "2px solid white",
+      padding: "0.2rem 0.6rem",
       marginLeft: "0.5rem",
+      boxShadow: "0 0 4px rgba(0,0,0,0.1)",
       minWidth: "1.5rem",
       textAlign: "center",
       fontWeight: "bold"
@@ -441,116 +465,175 @@ const handleDelete = async (id: number) => {
       return (
         <div key={`msg-${msg.id}`} style={{ marginBottom: "1.2rem" }}>
           {showDateSeparator && (
-            <div style={{ textAlign: "center", margin: "1rem 0", color: "#888", fontSize: "0.9rem", fontWeight: "bold" }}>
-              {currentDate.toLocaleDateString("ja-JP", { month: "numeric", day: "numeric", weekday: "short" })}
-            </div>
-          )}
-
-          <div style={{
-            display: "flex",
-            alignItems: "flex-end",
-            justifyContent: isMine ? "flex-end" : "flex-start",
-            position: "relative"
-          }}>
-            {!isMine && <div style={{ width: 24, marginRight: 8 }} />}
-            {msg.is_deleted ? (
-              <div style={{ fontStyle: "italic", color: "#6b7280", fontSize: "0.9rem", textAlign: "center", margin: "0 auto" }}>
-                このメッセージは削除されました
-              </div>
-            ) : (
-              
-              
-              <div style={{
-                maxWidth: "70%",
-                padding: "0.75rem 1rem",
-                borderRadius: "16px",
-                fontSize: "1rem",
-                lineHeight: "1.4",
-                boxShadow: "0 1px 4px rgba(0,0,0,0.04)",
-                backgroundColor: isMine ? "#f0616d" : "#e6e9f0",
-                color: isMine ? "#fff" : "#2d3142",
-                position: "relative",
-              }}>
-                {isImage ? (
-                  <img
-                    src={`http://localhost:8081${msg.content}`}
-                    alt="画像"
-                    style={{ maxWidth: "100%", borderRadius: "8px" }}
-                  />
-                ) : (
-                  <>
-                    <span>{msg.content}</span>
-                    {msg.edited && (
-                      <span style={{
-position: "absolute",
-        top: "-1.2rem",
-        right: isMine ? "0" : "auto",
-        left: isMine ? "auto" : "0",
-        fontSize: "0.7rem",
-        color: "#6b7280",
-        fontStyle: "normal",
-                      }}>
-                        編集済
-                      </span>
-                    )}
-                  </>
-                )}
-              </div>
-            )}
-
-            {isMine && !msg.is_deleted && (
-              <div style={{ margin: 8, cursor: "pointer", color: "#6b7280", fontSize: "18px" }} onClick={() => toggleMenu(msg.id)}>
-                ⋮
-                {openMenuId === msg.id && (
-                  <div style={{
-                    position: "absolute",
-                    top: "24px",
-                    right: 0,
-                    backgroundColor: "#fff",
-                    border: "1px solid #ccc",
-                    borderRadius: "8px",
-                    boxShadow: "0 4px 8px rgba(0,0,0,0.1)",
-                    minWidth: "120px",
-                    zIndex: 100
-                  }}>
-                    <button onClick={() => handleEdit(msg)} style={{ padding: "0.5rem 1rem", border: "none", background: "none", width: "100%", textAlign: "left", cursor: "pointer" }}>
-                      編集
-                    </button>
-                    <hr style={{ margin: 0, borderColor: "#eee" }} />
-                    <button onClick={() => handleDelete(msg.id)} style={{ padding: "0.5rem 1rem", border: "none", background: "none", width: "100%", textAlign: "left", cursor: "pointer" }}>
-                      削除
-                    </button>
-                  </div>
-                )}
-              </div>
-            )}
-          </div>
-
-          {!msg.is_deleted && (
             <div style={{
-              fontSize: "0.7rem",
-              textAlign: isMine ? "right" : "left",
-              opacity: 0.9,
-              marginTop: "0.3rem",
-              display: "flex",
-              justifyContent: isMine ? "flex-end" : "flex-start",
-              gap: "0.5rem",
-              paddingLeft: isMine ? undefined : "1.5rem",
-              color: "#6b7280",
-            }}>
-              {isMine && readers.length > 0 && (
-                <span style={{ color: "#6b7280", fontWeight: 500 }}>
-                  {readers.length === 1 ? "既読" : `既読${readers.length}`}
-                </span>
-              )}
-              <span>{currentDate.toLocaleTimeString("ja-JP", { 
-                hour: "2-digit", 
-                minute: "2-digit", 
-                hour12: false 
-                })}
-                </span>
-            </div>
-          )}
+    display: "flex",
+    alignItems: "center",
+    textAlign: "center",
+    color: "#888",
+    fontSize: "0.85rem",
+    margin: "1rem 0",
+  }}>
+    <hr style={{ flex: 1, border: "none", borderTop: "1px solid #ccc" }} />
+    <span style={{ padding: "0 0.75rem", fontWeight: "bold" }}>
+      {currentDate.toLocaleDateString("ja-JP", { month: "numeric", day: "numeric", weekday: "short" })}
+    </span>
+    <hr style={{ flex: 1, border: "none", borderTop: "1px solid #ccc" }} />
+  </div>
+)}  
+
+<div
+  style={{
+    display: "flex",
+    justifyContent: isMine ? "flex-end" : "flex-start",
+    alignItems: "flex-end",
+    gap: isMine ? "6px" : "0",  // 自分のメッセージだけ横並び用の隙間
+  }}
+>
+  {/* 左下に表示（自分のメッセージのみ） */}
+  {isMine && !msg.is_deleted && (
+    <div style={{
+      fontSize: "0.7rem",
+      color: "#6b7280",
+      lineHeight: "1.2",
+      textAlign: "right",
+      marginBottom: "2px"
+    }}>
+      {readers.length > 0 && (
+        <div style={{ fontWeight: 500 }}>
+          {readers.length === 1 ? "既読" : `既読${readers.length}`}
+        </div>
+      )}
+      <div>
+        {currentDate.toLocaleTimeString("ja-JP", {
+          hour: "2-digit",
+          minute: "2-digit",
+          hour12: false
+        })}
+      </div>
+    </div>
+  )}
+
+  {/* 吹き出し or 削除表示 */}
+  {msg.is_deleted ? (
+    <div style={{
+      fontStyle: "italic",
+      color: "#6b7280",
+      fontSize: "0.9rem",
+      textAlign: "center",
+      margin: "0 auto"
+    }}>
+      このメッセージは削除されました
+    </div>
+  ) : isImage ? (
+    <img
+      src={`http://localhost:8081${msg.content}`}
+      alt="画像"
+      style={{
+        maxWidth: "300px",
+        maxHeight: "200px",
+        borderRadius: "12px",
+        objectFit: "cover",
+        display: "block"
+      }}
+    />
+  ) : (
+    <div style={{
+      maxWidth: "70%",
+      padding: "0.75rem 1rem",
+      fontSize: "1rem",
+      lineHeight: "1.4",
+      boxShadow: "0 1px 4px rgba(0,0,0,0.04)",
+      backgroundColor: isMine ? "#f0616d" : "#e6e9f0",
+      color: isMine ? "#fff" : "#2d3142",
+      borderTopLeftRadius: "16px",
+      borderTopRightRadius: "16px",
+      borderBottomLeftRadius: isMine ? "16px" : "4px",
+      borderBottomRightRadius: isMine ? "4px" : "16px",
+      position: "relative"
+    }}>
+      {msg.content}
+
+      {/* 編集済表示 */}
+      {msg.edited && (
+        <div style={{
+          fontSize: "0.7rem",
+          color: isMine ? "#ffecec" : "#888",
+          marginTop: "0.25rem",
+          textAlign: isMine ? "right" : "left",
+        }}>
+          編集済
+        </div>
+      )}
+    </div>
+  )}
+
+  {/* 編集・削除メニュー */}
+ {isMine && !msg.is_deleted && (
+  <div style={{ position: "relative", marginLeft: "4px" }}>
+    <div
+      onClick={() => toggleMenu(msg.id)}
+      style={{
+        cursor: "pointer",
+        color: "#6b7280",
+        fontSize: "18px",
+        padding: "0.2rem"
+      }}
+    >
+      ⋮
+    </div>
+
+    {openMenuId === msg.id && (
+       <div ref={menuRef} style={{
+    position: "absolute",
+    top: "100%",
+    right: 0,
+    marginTop: "4px",
+    backgroundColor: "#fff",
+    border: "1px solid #ccc",
+    borderRadius: "8px",
+    boxShadow: "0 4px 8px rgba(0,0,0,0.1)",
+    minWidth: "120px",
+    zIndex: 100
+  }}>
+
+        <button
+          onClick={() => handleEdit(msg)}
+          style={{
+            padding: "0.5rem 1rem",
+            border: "none",
+            background: "none",
+            width: "100%",
+            textAlign: "left",
+            cursor: "pointer"
+          }}
+        >
+          編集
+        </button>
+        <hr style={{ margin: 0, borderColor: "#eee" }} />
+        <button
+          onClick={() => handleDelete(msg.id)}
+          style={{
+            padding: "0.5rem 1rem",
+            border: "none",
+            background: "none",
+            width: "100%",
+            textAlign: "left",
+            cursor: "pointer"
+          }}
+        >
+          削除
+        </button>
+      </div>
+    )}
+  </div>
+)}
+
+</div>
+
+
+          
+          
+
         </div>
       );
     })}
